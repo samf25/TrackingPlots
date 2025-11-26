@@ -1,8 +1,8 @@
 #include "TSystem.h"
 #include <iostream>
-#include "PlotTracks.h"
-#include "PlotSeeds.h"
-#include "PlotHits.h"
+#include "PlotTracks.C"
+#include "PlotSeeds.C"
+#include "PlotHits.C"
 
 void PlotAll(const char* inputDir, const char* outputDir) {
     
@@ -30,12 +30,12 @@ void PlotAll(const char* inputDir, const char* outputDir) {
     printf("\n========================================\n");
     printf("Running PlotSeeds...\n");
     printf("========================================\n");
-    PlotSeeds((inDir + "seeds.root").c_str(), (outDir + "seeds_plots.root").c_str());
+    PlotSeeds((inDir + "seeds_ntuple.root").c_str(), (outDir + "seeds_plots.root").c_str());
     
     printf("\n========================================\n");
     printf("Running PlotHits...\n");
     printf("========================================\n");
-    PlotHits((inDir + "hits.root").c_str(), (outDir + "hits_plots.root").c_str());
+    PlotHits((inDir + "hits_ntuple.root").c_str(), (outDir + "hits_plots.root").c_str());
     
     printf("\n========================================\n");
     printf("All plotters complete!\n");
