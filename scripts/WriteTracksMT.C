@@ -39,27 +39,19 @@ static std::vector<std::string> GetMatchingFiles_TracksMT(const char* pathPrefix
     return files;
 }
 
-// Data structures to hold results from each file
-struct TrackFileResult {
-    std::vector<std::array<float, 3>> truth_data;      // pt, theta, charge
-    std::vector<std::array<float, 5>> track_data;      // pt, nHits, nHoles, chi2ndof, isReal
-    std::vector<std::array<float, 11>> matched_data;   // all matched fields
-    std::vector<std::array<float, 4>> event_data;      // nTracks, nTruths, nMatched, nFake
-    Long64_t entries = 0;
-};
+// Data structures to hold results from each file - REMOVED, now using incremental writing
 
-TrackFileResult ProcessTrackFile(const std::string& filename, const char* branchName, bool isSubsetCollection) {
-    TrackFileResult result;
+void ProcessAndWriteTrackFile(const std::string& filename, const char* branchName, bool isSubsetCollection,
+                              TNtuple* ntuple_truth, TNtuple* ntuple_tracks, TNtuple* ntuple_matched, TNtuple* ntuple_events,
+                              std::mutex& writeMutex, std::atomic<Long64_t>& totalEntries) {
     
     TFile* file = TFile::Open(filename.c_str());
-    if (!file || file->IsZombie()) {
-        return result;
-    }
+    if (!file || file->IsZombie()) return;
     
     TTree* tree = (TTree*)file->Get("events");
     if (!tree) {
         file->Close();
-        return result;
+        return;
     }
     
     // Set up branches
@@ -83,13 +75,17 @@ TrackFileResult ProcessTrackFile(const std::string& filename, const char* branch
     tree->SetBranchAddress(("_" + std::string(branchName) + "Relations_from").c_str(), &fromRelations);
 
     Long64_t nEntries = tree->GetEntries();
-    result.entries = nEntries;
+    totalEntries += nEntries;
     
-    // Reserve space to reduce allocations
-    result.truth_data.reserve(nEntries * 2);
-    result.track_data.reserve(nEntries * 10);
-    result.matched_data.reserve(nEntries * 5);
-    result.event_data.reserve(nEntries);
+    // Local buffers for this file
+    std::vector<std::array<float, 3>> truth_data;
+    std::vector<std::array<float, 5>> track_data;
+    std::vector<std::array<float, 11>> matched_data;
+    std::vector<std::array<float, 4>> event_data;
+    truth_data.reserve(nEntries * 2);
+    track_data.reserve(nEntries * 10);
+    matched_data.reserve(nEntries * 5);
+    event_data.reserve(nEntries);
     
     for (Long64_t i = 0; i < nEntries; i++) {
         tree->GetEntry(i);
@@ -110,7 +106,7 @@ TrackFileResult ProcessTrackFile(const std::string& filename, const char* branch
                 double theta = std::atan2(std::sqrt(mom.x*mom.x + mom.y*mom.y), mom.z);
                 
                 mcpSet.push_back(mcp);
-                result.truth_data.push_back({(float)pt, (float)theta, (float)mcp.charge});
+                truth_data.push_back({(float)pt, (float)theta, (float)mcp.charge});
                 nTruths++;
             }
         }
@@ -172,8 +168,8 @@ TrackFileResult ProcessTrackFile(const std::string& filename, const char* branch
                             float nHoles = trkObj.Nholes;
                             float chi2ndof = (trkObj.ndf > 0) ? trkObj.chi2 / trkObj.ndf : -1;
                             
-                            result.matched_data.push_back({true_pt, true_theta, (float)mcpObj.charge, reco_pt, 
-                                                          reco_d0, reco_z0, true_d0, true_z0, nHits, nHoles, chi2ndof});
+                            matched_data.push_back({true_pt, true_theta, (float)mcpObj.charge, reco_pt, 
+                                                   reco_d0, reco_z0, true_d0, true_z0, nHits, nHoles, chi2ndof});
                             nMatched++;
                         }
                     }
@@ -191,15 +187,23 @@ TrackFileResult ProcessTrackFile(const std::string& filename, const char* branch
             float chi2ndof = (trk.ndf > 0) ? trk.chi2 / trk.ndf : -1;
             float isReal = trackMatched[t] ? 1.0f : 0.0f;
             
-            result.track_data.push_back({trackPt, nHits, nHoles, chi2ndof, isReal});
+            track_data.push_back({trackPt, nHits, nHoles, chi2ndof, isReal});
             if (!trackMatched[t]) nFake++;
         }
         
-        result.event_data.push_back({(float)trkSet.size(), (float)nTruths, (float)nMatched, (float)nFake});
+        event_data.push_back({(float)trkSet.size(), (float)nTruths, (float)nMatched, (float)nFake});
     }
     
     file->Close();
-    return result;
+    
+    // Write to TNtuples with mutex protection
+    {
+        std::lock_guard<std::mutex> lock(writeMutex);
+        for (const auto& d : truth_data) ntuple_truth->Fill(d[0], d[1], d[2]);
+        for (const auto& d : track_data) ntuple_tracks->Fill(d[0], d[1], d[2], d[3], d[4]);
+        for (const auto& d : matched_data) ntuple_matched->Fill(d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9], d[10]);
+        for (const auto& d : event_data) ntuple_events->Fill(d[0], d[1], d[2], d[3]);
+    }
 }
 
 void WriteTracksMT(const char* inputFilePrefix, const char* outputFile, const char* branchName = "SiTrack", bool isSubsetCollection = true, int nThreads = 4) {
@@ -219,10 +223,18 @@ void WriteTracksMT(const char* inputFilePrefix, const char* outputFile, const ch
     
     printf("Found %zu files to process with %d threads\n", files.size(), nThreads);
     
-    // Results storage
-    std::vector<TrackFileResult> results(files.size());
+    // Create output file and TNtuples upfront
+    TFile* outFile = new TFile(outputFile, "RECREATE");
+    TNtuple* ntuple_truth = new TNtuple("truth", "MC Truth Particles", "pt:theta:charge");
+    TNtuple* ntuple_tracks = new TNtuple("tracks", "All Tracks", "pt:nHits:nHoles:chi2ndof:isReal");
+    TNtuple* ntuple_matched = new TNtuple("matched", "Matched Tracks", 
+        "true_pt:true_theta:true_charge:reco_pt:reco_d0:reco_z0:true_d0:true_z0:nHits:nHoles:chi2ndof");
+    TNtuple* ntuple_events = new TNtuple("events_summary", "Event Summary", "nTracks:nTruths:nMatched:nFake");
+    
+    std::mutex writeMutex;
     std::atomic<int> filesProcessed(0);
     std::atomic<int> nextFileIdx(0);
+    std::atomic<Long64_t> totalEntries(0);
     
     // Worker function
     auto worker = [&]() {
@@ -230,9 +242,9 @@ void WriteTracksMT(const char* inputFilePrefix, const char* outputFile, const ch
             int idx = nextFileIdx.fetch_add(1);
             if (idx >= (int)files.size()) break;
             
-            results[idx] = ProcessTrackFile(files[idx], branchName, isSubsetCollection);
+            ProcessAndWriteTrackFile(files[idx], branchName, isSubsetCollection, ntuple_truth, ntuple_tracks, ntuple_matched, ntuple_events, writeMutex, totalEntries);
             int done = filesProcessed.fetch_add(1) + 1;
-            printf("Processed %d/%zu files: %s (%lld events)\n", done, files.size(), files[idx].c_str(), results[idx].entries);
+            printf("Processed %d/%zu files: %s\n", done, files.size(), files[idx].c_str());
         }
     };
     
@@ -248,26 +260,8 @@ void WriteTracksMT(const char* inputFilePrefix, const char* outputFile, const ch
         t.join();
     }
     
-    // Merge results and write to file
-    printf("\nMerging results and writing to %s...\n", outputFile);
-    
-    TFile* outFile = new TFile(outputFile, "RECREATE");
-    TNtuple* ntuple_truth = new TNtuple("truth", "MC Truth Particles", "pt:theta:charge");
-    TNtuple* ntuple_tracks = new TNtuple("tracks", "All Tracks", "pt:nHits:nHoles:chi2ndof:isReal");
-    TNtuple* ntuple_matched = new TNtuple("matched", "Matched Tracks", 
-        "true_pt:true_theta:true_charge:reco_pt:reco_d0:reco_z0:true_d0:true_z0:nHits:nHoles:chi2ndof");
-    TNtuple* ntuple_events = new TNtuple("events_summary", "Event Summary", "nTracks:nTruths:nMatched:nFake");
-    
-    Long64_t totalEntries = 0;
-    for (const auto& result : results) {
-        totalEntries += result.entries;
-        for (const auto& d : result.truth_data) ntuple_truth->Fill(d[0], d[1], d[2]);
-        for (const auto& d : result.track_data) ntuple_tracks->Fill(d[0], d[1], d[2], d[3], d[4]);
-        for (const auto& d : result.matched_data) ntuple_matched->Fill(d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9], d[10]);
-        for (const auto& d : result.event_data) ntuple_events->Fill(d[0], d[1], d[2], d[3]);
-    }
-    
-    printf("Total events processed: %lld\n", totalEntries);
+    printf("\nTotal events processed: %lld\n", totalEntries.load());
+    printf("Writing to %s...\n", outputFile);
     
     outFile->Write();
     outFile->Close();

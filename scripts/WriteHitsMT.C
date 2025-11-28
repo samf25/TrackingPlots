@@ -31,23 +31,16 @@ static std::vector<std::string> GetMatchingFiles_HitsMT(const char* pathPrefix) 
     return files;
 }
 
-struct HitFileResult {
-    std::vector<std::array<float, 3>> hit_data;    // theta, layer, isBarrel
-    std::vector<std::array<float, 4>> event_data;  // nHits_VXD, nHits_IT, nHits_OT, nHits_total
-    Long64_t entries = 0;
-};
-
 static const char* branchNames_MT[] = {"VXDBarrelHits", "VXDEndcapHits", "ITBarrelHits", "ITEndcapHits", "OTBarrelHits", "OTEndcapHits"};
 static const int layerMapping_MT[] = {0, 0, 1, 1, 2, 2}; // VXD=0, IT=1, OT=2
 
-HitFileResult ProcessHitFile(const std::string& filename) {
-    HitFileResult result;
-    
+void ProcessAndWriteHitFile(const std::string& filename, TNtuple* ntuple_hits, TNtuple* ntuple_events, 
+                            std::mutex& writeMutex, std::atomic<Long64_t>& totalEntries) {
     TFile* file = TFile::Open(filename.c_str());
-    if (!file || file->IsZombie()) return result;
+    if (!file || file->IsZombie()) return;
     
     TTree* tree = (TTree*)file->Get("events");
-    if (!tree) { file->Close(); return result; }
+    if (!tree) { file->Close(); return; }
 
     std::vector<std::vector<edm4hep::TrackerHitPlaneData>*> hitCollections(6, nullptr);
     for (int i = 0; i < 6; i++) {
@@ -55,11 +48,13 @@ HitFileResult ProcessHitFile(const std::string& filename) {
     }
     
     Long64_t nEntries = tree->GetEntries();
-    result.entries = nEntries;
+    totalEntries += nEntries;
     
-    // Pre-allocate
-    result.hit_data.reserve(nEntries * 100);
-    result.event_data.reserve(nEntries);
+    // Local buffers for this file
+    std::vector<std::array<float, 3>> hit_data;
+    std::vector<std::array<float, 4>> event_data;
+    hit_data.reserve(nEntries * 100);
+    event_data.reserve(nEntries);
     
     for (Long64_t evt = 0; evt < nEntries; evt++) {
         tree->GetEntry(evt);
@@ -76,17 +71,23 @@ HitFileResult ProcessHitFile(const std::string& filename) {
                 edm4hep::Vector3d position = hit.position;
                 float theta = atan2(sqrt(position.x*position.x + position.y*position.y), position.z);
                 
-                result.hit_data.push_back({theta, (float)layer, isBarrel});
+                hit_data.push_back({theta, (float)layer, isBarrel});
                 nHits[layer]++;
             }
         }
         
-        result.event_data.push_back({(float)nHits[0], (float)nHits[1], (float)nHits[2], 
-                                     (float)(nHits[0]+nHits[1]+nHits[2])});
+        event_data.push_back({(float)nHits[0], (float)nHits[1], (float)nHits[2], 
+                             (float)(nHits[0]+nHits[1]+nHits[2])});
     }
     
     file->Close();
-    return result;
+    
+    // Write to TNtuples with mutex protection
+    {
+        std::lock_guard<std::mutex> lock(writeMutex);
+        for (const auto& d : hit_data) ntuple_hits->Fill(d[0], d[1], d[2]);
+        for (const auto& d : event_data) ntuple_events->Fill(d[0], d[1], d[2], d[3]);
+    }
 }
 
 void WriteHitsMT(const char* inputFilePrefix, const char* outputFile, int nThreads = 4) {
@@ -106,18 +107,24 @@ void WriteHitsMT(const char* inputFilePrefix, const char* outputFile, int nThrea
     
     printf("Found %zu files to process with %d threads\n", files.size(), nThreads);
     
-    std::vector<HitFileResult> results(files.size());
+    // Create output file and TNtuples upfront
+    TFile* outFile = new TFile(outputFile, "RECREATE");
+    TNtuple* ntuple_hits = new TNtuple("hits", "Tracker Hits", "theta:layer:isBarrel");
+    TNtuple* ntuple_events = new TNtuple("events_summary", "Event Summary", "nHits_VXD:nHits_IT:nHits_OT:nHits_total");
+    
+    std::mutex writeMutex;
     std::atomic<int> filesProcessed(0);
     std::atomic<int> nextFileIdx(0);
+    std::atomic<Long64_t> totalEntries(0);
     
     auto worker = [&]() {
         while (true) {
             int idx = nextFileIdx.fetch_add(1);
             if (idx >= (int)files.size()) break;
             
-            results[idx] = ProcessHitFile(files[idx]);
+            ProcessAndWriteHitFile(files[idx], ntuple_hits, ntuple_events, writeMutex, totalEntries);
             int done = filesProcessed.fetch_add(1) + 1;
-            printf("Processed %d/%zu files: %s (%lld events)\n", done, files.size(), files[idx].c_str(), results[idx].entries);
+            printf("Processed %d/%zu files: %s\n", done, files.size(), files[idx].c_str());
         }
     };
     
@@ -126,20 +133,8 @@ void WriteHitsMT(const char* inputFilePrefix, const char* outputFile, int nThrea
     for (int t = 0; t < actualThreads; t++) threads.emplace_back(worker);
     for (auto& t : threads) t.join();
     
-    printf("\nMerging results and writing to %s...\n", outputFile);
-    
-    TFile* outFile = new TFile(outputFile, "RECREATE");
-    TNtuple* ntuple_hits = new TNtuple("hits", "Tracker Hits", "theta:layer:isBarrel");
-    TNtuple* ntuple_events = new TNtuple("events_summary", "Event Summary", "nHits_VXD:nHits_IT:nHits_OT:nHits_total");
-    
-    Long64_t totalEntries = 0;
-    for (const auto& result : results) {
-        totalEntries += result.entries;
-        for (const auto& d : result.hit_data) ntuple_hits->Fill(d[0], d[1], d[2]);
-        for (const auto& d : result.event_data) ntuple_events->Fill(d[0], d[1], d[2], d[3]);
-    }
-    
-    printf("Total events processed: %lld\n", totalEntries);
+    printf("\nTotal events processed: %lld\n", totalEntries.load());
+    printf("Writing to %s...\n", outputFile);
     
     outFile->Write();
     outFile->Close();

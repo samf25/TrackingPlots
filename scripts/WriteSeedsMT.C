@@ -38,13 +38,7 @@ static std::vector<std::string> GetMatchingFiles_SeedsMT(const char* pathPrefix)
     return files;
 }
 
-struct SeedFileResult {
-    std::vector<std::array<float, 2>> seed_data;       // theta, isMatched
-    std::vector<std::array<float, 10>> matched_data;   // resolution fields
-    std::vector<std::array<float, 3>> layer_data;      // layer, isBarrel, isMatched
-    std::vector<std::array<float, 4>> event_data;      // nSeeds, nMatched, nUnmatched, avgSeedsPerMCP
-    Long64_t entries = 0;
-};
+
 
 static std::vector<std::string> trackerHitCollections_MT = {
     "ITBarrelHits", "ITEndcapHits", "VXDBarrelHits", 
@@ -56,15 +50,16 @@ static std::vector<std::string> simTrackerHitCollections_MT = {
     "OuterTrackerBarrelCollection", "OuterTrackerEndcapCollection"
 };
 
-SeedFileResult ProcessSeedFile(const std::string& filename, const char* branchName) {
-    SeedFileResult result;
+void ProcessAndWriteSeedFile(const std::string& filename, const char* branchName,
+                             TNtuple* ntuple_seeds, TNtuple* ntuple_matched, TNtuple* ntuple_layers, TNtuple* ntuple_events,
+                             std::mutex& writeMutex, std::atomic<Long64_t>& totalEntries) {
     dd4hep::DDSegmentation::BitFieldCoder bitFieldCoder("system:5,side:-2,layer:6,module:11,sensor:8");
     
     TFile* file = TFile::Open(filename.c_str());
-    if (!file || file->IsZombie()) return result;
+    if (!file || file->IsZombie()) return;
     
     TTree* tree = (TTree*)file->Get("events");
-    if (!tree) { file->Close(); return result; }
+    if (!tree) { file->Close(); return; }
     
     // Get collection ID mapping
     TTree* meta = static_cast<TTree*>(file->Get("podio_metadata"));
@@ -105,7 +100,17 @@ SeedFileResult ProcessSeedFile(const std::string& filename, const char* branchNa
     }
 
     Long64_t nEntries = tree->GetEntries();
-    result.entries = nEntries;
+    totalEntries += nEntries;
+    
+    // Local buffers for this file
+    std::vector<std::array<float, 2>> seed_data;
+    std::vector<std::array<float, 10>> matched_data;
+    std::vector<std::array<float, 3>> layer_data;
+    std::vector<std::array<float, 4>> event_data;
+    seed_data.reserve(nEntries * 5);
+    matched_data.reserve(nEntries * 5);
+    layer_data.reserve(nEntries * 20);
+    event_data.reserve(nEntries);
     
     for (Long64_t evt = 0; evt < nEntries; evt++) {
         tree->GetEntry(evt);
@@ -160,7 +165,7 @@ SeedFileResult ProcessSeedFile(const std::string& filename, const char* branchNa
                 }
             }
 
-            result.seed_data.push_back({theta, isMatched ? 1.0f : 0.0f});
+            seed_data.push_back({theta, isMatched ? 1.0f : 0.0f});
 
             // Layer info
             for (unsigned int hitIdx = trk.trackerHits_begin; hitIdx < trk.trackerHits_end; ++hitIdx) {
@@ -174,7 +179,7 @@ SeedFileResult ProcessSeedFile(const std::string& filename, const char* branchNa
                 
                 int layer = bitFieldCoder.get(hitVec->at(hitID.index).cellID, "layer");
                 float isBarrel = (collIdx % 2 == 0) ? 1.0f : 0.0f;
-                result.layer_data.push_back({(float)layer, isBarrel, isMatched ? 1.0f : 0.0f});
+                layer_data.push_back({(float)layer, isBarrel, isMatched ? 1.0f : 0.0f});
             }
 
             if (isMatched) {
@@ -196,8 +201,8 @@ SeedFileResult ProcessSeedFile(const std::string& filename, const char* branchNa
                 float res_d0 = reco_d0 - true_d0;
                 float res_z0 = reco_z0 - true_z0;
                 
-                result.matched_data.push_back({true_pt, true_theta, reco_pt, reco_d0, reco_z0, 
-                                              true_d0, true_z0, res_q_over_pt, res_d0, res_z0});
+                matched_data.push_back({true_pt, true_theta, reco_pt, reco_d0, reco_z0, 
+                                       true_d0, true_z0, res_q_over_pt, res_d0, res_z0});
             } else {
                 unmatchedSeeds++;
             }
@@ -210,11 +215,19 @@ SeedFileResult ProcessSeedFile(const std::string& filename, const char* branchNa
             avgSeedsPerMCP = total / mcpMatchCount.size();
         }
         
-        result.event_data.push_back({(float)totalSeeds, (float)matchedSeeds, (float)unmatchedSeeds, avgSeedsPerMCP});
+        event_data.push_back({(float)totalSeeds, (float)matchedSeeds, (float)unmatchedSeeds, avgSeedsPerMCP});
     }
     
     file->Close();
-    return result;
+    
+    // Write to TNtuples with mutex protection
+    {
+        std::lock_guard<std::mutex> lock(writeMutex);
+        for (const auto& d : seed_data) ntuple_seeds->Fill(d[0], d[1]);
+        for (const auto& d : matched_data) ntuple_matched->Fill(d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9]);
+        for (const auto& d : layer_data) ntuple_layers->Fill(d[0], d[1], d[2]);
+        for (const auto& d : event_data) ntuple_events->Fill(d[0], d[1], d[2], d[3]);
+    }
 }
 
 void WriteSeedsMT(const char* inputFilePrefix, const char* outputFile, const char* branchName = "SeedTracks", int nThreads = 4) {
@@ -234,18 +247,27 @@ void WriteSeedsMT(const char* inputFilePrefix, const char* outputFile, const cha
     
     printf("Found %zu files to process with %d threads\n", files.size(), nThreads);
     
-    std::vector<SeedFileResult> results(files.size());
+    // Create output file and TNtuples upfront
+    TFile* outFile = new TFile(outputFile, "RECREATE");
+    TNtuple* ntuple_seeds = new TNtuple("seeds", "All Seeds", "theta:isMatched");
+    TNtuple* ntuple_matched = new TNtuple("matched_seeds", "Matched Seeds",
+        "true_pt:true_theta:reco_pt:reco_d0:reco_z0:true_d0:true_z0:res_q_over_pt:res_d0:res_z0");
+    TNtuple* ntuple_layers = new TNtuple("seed_layers", "Seed Hit Layers", "layer:isBarrel:isMatched");
+    TNtuple* ntuple_events = new TNtuple("events_summary", "Event Summary", "nSeeds:nMatched:nUnmatched:avgSeedsPerMCP");
+    
+    std::mutex writeMutex;
     std::atomic<int> filesProcessed(0);
     std::atomic<int> nextFileIdx(0);
+    std::atomic<Long64_t> totalEntries(0);
     
     auto worker = [&]() {
         while (true) {
             int idx = nextFileIdx.fetch_add(1);
             if (idx >= (int)files.size()) break;
             
-            results[idx] = ProcessSeedFile(files[idx], branchName);
+            ProcessAndWriteSeedFile(files[idx], branchName, ntuple_seeds, ntuple_matched, ntuple_layers, ntuple_events, writeMutex, totalEntries);
             int done = filesProcessed.fetch_add(1) + 1;
-            printf("Processed %d/%zu files: %s (%lld events)\n", done, files.size(), files[idx].c_str(), results[idx].entries);
+            printf("Processed %d/%zu files: %s\n", done, files.size(), files[idx].c_str());
         }
     };
     
@@ -254,25 +276,8 @@ void WriteSeedsMT(const char* inputFilePrefix, const char* outputFile, const cha
     for (int t = 0; t < actualThreads; t++) threads.emplace_back(worker);
     for (auto& t : threads) t.join();
     
-    printf("\nMerging results and writing to %s...\n", outputFile);
-    
-    TFile* outFile = new TFile(outputFile, "RECREATE");
-    TNtuple* ntuple_seeds = new TNtuple("seeds", "All Seeds", "theta:isMatched");
-    TNtuple* ntuple_matched = new TNtuple("matched_seeds", "Matched Seeds",
-        "true_pt:true_theta:reco_pt:reco_d0:reco_z0:true_d0:true_z0:res_q_over_pt:res_d0:res_z0");
-    TNtuple* ntuple_layers = new TNtuple("seed_layers", "Seed Hit Layers", "layer:isBarrel:isMatched");
-    TNtuple* ntuple_events = new TNtuple("events_summary", "Event Summary", "nSeeds:nMatched:nUnmatched:avgSeedsPerMCP");
-    
-    Long64_t totalEntries = 0;
-    for (const auto& result : results) {
-        totalEntries += result.entries;
-        for (const auto& d : result.seed_data) ntuple_seeds->Fill(d[0], d[1]);
-        for (const auto& d : result.matched_data) ntuple_matched->Fill(d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9]);
-        for (const auto& d : result.layer_data) ntuple_layers->Fill(d[0], d[1], d[2]);
-        for (const auto& d : result.event_data) ntuple_events->Fill(d[0], d[1], d[2], d[3]);
-    }
-    
-    printf("Total events processed: %lld\n", totalEntries);
+    printf("\nTotal events processed: %lld\n", totalEntries.load());
+    printf("Writing to %s...\n", outputFile);
     
     outFile->Write();
     outFile->Close();
