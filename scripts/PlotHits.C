@@ -113,7 +113,7 @@ void PlotHits(const char* inputFile, const char* outputFile) {
         
         MuCollStyle::AddStandardLabels(c, "10 TeV");
         
-        TLegend* leg = new TLegend(0.65, 0.75, 0.88, 0.88);
+        TLegend* leg = MuCollStyle::CreateLegend(0.65, 0.75, 0.88, 0.88);
         leg->AddEntry(h_density[layer], layerLabels[layer], "pe");
         leg->Draw();
         
@@ -137,7 +137,7 @@ void PlotHits(const char* inputFile, const char* outputFile) {
     h_density[1]->Draw("PE SAME");
     h_density[2]->Draw("PE SAME");
     
-    TLegend* leg_combined = new TLegend(0.65, 0.65, 0.88, 0.88);
+    TLegend* leg_combined = MuCollStyle::CreateLegend(0.65, 0.65, 0.88, 0.88);
     for (int layer = 0; layer < 3; layer++) {
         leg_combined->AddEntry(h_density[layer], layerLabels[layer], "pe");
     }
@@ -151,10 +151,11 @@ void PlotHits(const char* inputFile, const char* outputFile) {
     evtDir->cd();
     
     // Create histograms for event summary
-    TH1D* h_nHits_total = new TH1D("h_nHits_total", "", 100, 0, 10000);
-    TH1D* h_nHits_VXD = new TH1D("h_nHits_VXD", "", 100, 0, 5000);
-    TH1D* h_nHits_IT = new TH1D("h_nHits_IT", "", 100, 0, 3000);
-    TH1D* h_nHits_OT = new TH1D("h_nHits_OT", "", 100, 0, 2000);
+    // Use float vectors instead of histograms
+    std::vector<float> v_nHits_total;
+    std::vector<float> v_nHits_VXD;
+    std::vector<float> v_nHits_IT;
+    std::vector<float> v_nHits_OT;
     
     Float_t e_nHits_VXD, e_nHits_IT, e_nHits_OT, e_nHits_total;
     events_ntuple->SetBranchAddress("nHits_VXD", &e_nHits_VXD);
@@ -164,12 +165,35 @@ void PlotHits(const char* inputFile, const char* outputFile) {
     
     for (Long64_t i = 0; i < events_ntuple->GetEntries(); i++) {
         events_ntuple->GetEntry(i);
-        h_nHits_total->Fill(e_nHits_total);
-        h_nHits_VXD->Fill(e_nHits_VXD);
-        h_nHits_IT->Fill(e_nHits_IT);
-        h_nHits_OT->Fill(e_nHits_OT);
+        v_nHits_total.push_back(e_nHits_total);
+        v_nHits_VXD.push_back(e_nHits_VXD);
+        v_nHits_IT.push_back(e_nHits_IT);
+        v_nHits_OT.push_back(e_nHits_OT);
     }
-    
+    // Find maximums for histogram ranges
+    float max_total = *std::max_element(v_nHits_total.begin(), v_nHits_total.end());
+    float max_VXD = *std::max_element(v_nHits_VXD.begin(), v_nHits_VXD.end());
+    float max_IT = *std::max_element(v_nHits_IT.begin(), v_nHits_IT.end());
+    float max_OT = *std::max_element(v_nHits_OT.begin(), v_nHits_OT.end());
+    float max_layer = std::max({max_VXD, max_IT, max_OT});
+
+    // Define histogram binning
+    int nBins = 50;
+
+    // Create histograms
+    TH1D* h_nHits_total = new TH1D("h_nHits_total", "Total Hits per Event", nBins, 0, max_total * 1.1);
+    TH1D* h_nHits_VXD   = new TH1D("h_nHits_VXD",   "VXD Hits per Event",   nBins, 0, max_layer * 1.1);
+    TH1D* h_nHits_IT    = new TH1D("h_nHits_IT",    "IT Hits per Event",    nBins, 0, max_layer * 1.1);
+    TH1D* h_nHits_OT    = new TH1D("h_nHits_OT",    "OT Hits per Event",    nBins, 0, max_layer * 1.1);
+
+    // Fill histograms
+    for (size_t i = 0; i < v_nHits_total.size(); ++i) {
+        h_nHits_total->Fill(v_nHits_total[i]);
+        h_nHits_VXD->Fill(v_nHits_VXD[i]);
+        h_nHits_IT->Fill(v_nHits_IT[i]);
+        h_nHits_OT->Fill(v_nHits_OT[i]);
+    }
+
     TCanvas* c_total = MuCollStyle::CreateCanvas("c_total_hits", "Total Hits per Event");
     MuCollStyle::StyleHist(h_nHits_total, MuCollStyle::GetColor(0));
     h_nHits_total->GetXaxis()->SetTitle("Hits per Event");
@@ -195,7 +219,7 @@ void PlotHits(const char* inputFile, const char* outputFile) {
     h_nHits_IT->Draw("HIST SAME");
     h_nHits_OT->Draw("HIST SAME");
     
-    TLegend* leg_layers = new TLegend(0.65, 0.65, 0.88, 0.88);
+    TLegend* leg_layers = MuCollStyle::CreateLegend(0.65, 0.65, 0.88, 0.88);
     leg_layers->AddEntry(h_nHits_VXD, "Vertex Detector", "l");
     leg_layers->AddEntry(h_nHits_IT, "Inner Tracker", "l");
     leg_layers->AddEntry(h_nHits_OT, "Outer Tracker", "l");

@@ -7,6 +7,7 @@
 #include "TStyle.h"
 #include "TROOT.h"
 #include <iostream>
+#include <algorithm>
 
 // Include the plot style header
 #include "SimplePlotTemplate.h"
@@ -67,9 +68,9 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
     TH1D* h_seed_layer_endcap_unmatched = new TH1D("seed_layer_endcap_unmatched", "", 15, 0, 15);
     
     // Event-level histograms
-    TH1D* h_seed_number = new TH1D("seed_number", "", 100, 0, 1000);
-    TH1D* h_seed_matched = new TH1D("seed_matched", "", 100, 0, 1000);
-    TH1D* h_seed_unmatched = new TH1D("seed_unmatched", "", 100, 0, 1000);
+    std::vector<double> seed_number_vec;
+    std::vector<double> seed_matched_vec;
+    std::vector<double> seed_unmatched_vec;
     TH1D* h_seeds_per_MCP = new TH1D("seeds_per_MCP", "", 10, 0, 10);
     
     // Resolution histograms
@@ -127,9 +128,9 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
         
         for (Long64_t i = 0; i < events_ntuple->GetEntries(); i++) {
             events_ntuple->GetEntry(i);
-            h_seed_number->Fill(e_nSeeds);
-            h_seed_matched->Fill(e_nMatched);
-            h_seed_unmatched->Fill(e_nUnmatched);
+            seed_number_vec.push_back(e_nSeeds);
+            seed_matched_vec.push_back(e_nMatched);
+            seed_unmatched_vec.push_back(e_nUnmatched);
             if (e_avgSeedsPerMCP > 0) h_seeds_per_MCP->Fill(e_avgSeedsPerMCP);
         }
     }
@@ -166,6 +167,13 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
     TDirectory* seedDir = outFile->mkdir("SeedInfo");
     seedDir->cd();
     
+    // Helper: adjust canvas margins for right axis
+    auto adjust_margins = [](TCanvas* c) {
+        c->SetLeftMargin(0.10);  // Reduce left margin
+        c->SetRightMargin(0.18); // Increase right margin for right axis
+        c->SetTicky(0);          // Disable right-side tick marks (we have a custom axis)
+    };
+    
     // Seed theta distribution
     TCanvas* c_theta = MuCollStyle::CreateCanvas("c_seed_theta", "Seed #theta Distribution");
     MuCollStyle::StyleHist(h_seed_theta, MuCollStyle::GetColor(0));
@@ -175,22 +183,69 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
     MuCollStyle::AddStandardLabels(c_theta, "10 TeV");
     c_theta->Write();
     
-    // Seeds per event
+    // Seeds per event - with matched on right axis
+    // Determine histogram range from data
+    double maxSeeds = 10;
+    if (!seed_number_vec.empty()) {
+        maxSeeds = *std::max_element(seed_number_vec.begin(), seed_number_vec.end()) * 1.1;
+        if (maxSeeds < 10) maxSeeds = 10;
+    }
+    TH1D* h_seed_number = new TH1D("seed_number", "", 50, 0, maxSeeds);
+    TH1D* h_seed_matched = new TH1D("seed_matched", "", 50, 0, maxSeeds);
+    TH1D* h_seed_unmatched = new TH1D("seed_unmatched", "", 50, 0, maxSeeds);
+
+    for (size_t i = 0; i < seed_number_vec.size(); ++i) {
+        h_seed_number->Fill(seed_number_vec[i]);
+    }
+    for (size_t i = 0; i < seed_matched_vec.size(); ++i) {
+        h_seed_matched->Fill(seed_matched_vec[i]);
+    }
+    for (size_t i = 0; i < seed_unmatched_vec.size(); ++i) {
+        h_seed_unmatched->Fill(seed_unmatched_vec[i]);
+    }
+    double scale_factor = 1.0;
+    if (h_seed_number->GetMaximum() > 0 && h_seed_matched->GetMaximum() > 0) {
+        scale_factor = h_seed_number->GetMaximum() / h_seed_matched->GetMaximum();
+        if (scale_factor < 5.0) scale_factor = 5.0;
+    }
+    TH1D* h_seed_matched_scaled = (TH1D*)h_seed_matched->Clone("seed_matched_scaled");
+    h_seed_matched_scaled->Scale(scale_factor);
+    
     TCanvas* c_nSeeds = MuCollStyle::CreateCanvas("c_nSeeds", "Seeds per Event");
+    adjust_margins(c_nSeeds);
     MuCollStyle::StyleHist(h_seed_number, MuCollStyle::GetColor(0));
-    MuCollStyle::StyleHist(h_seed_matched, MuCollStyle::GetColor(1));
+    MuCollStyle::StyleHist(h_seed_matched_scaled, MuCollStyle::GetColor(1));
     MuCollStyle::StyleHist(h_seed_unmatched, MuCollStyle::GetColor(2));
+    h_seed_unmatched->SetLineStyle(2);  // Dotted line for unmatched
     h_seed_number->GetXaxis()->SetTitle("Number of Seeds");
-    h_seed_number->GetYaxis()->SetTitle("Events");
+    h_seed_number->GetYaxis()->SetTitle("Events (Total/Unmatched)");
     h_seed_number->Draw("HIST");
-    h_seed_matched->Draw("HIST SAME");
     h_seed_unmatched->Draw("HIST SAME");
-    TLegend* leg_nSeeds = new TLegend(0.55, 0.65, 0.88, 0.88);
+    h_seed_matched_scaled->Draw("HIST SAME");
+    TLegend* leg_nSeeds = MuCollStyle::CreateLegend(0.45, 0.65, 0.78, 0.88);
     leg_nSeeds->AddEntry(h_seed_number, "Total Seeds", "l");
-    leg_nSeeds->AddEntry(h_seed_matched, "Matched Seeds", "l");
+    leg_nSeeds->AddEntry(h_seed_matched_scaled, "Matched Seeds", "l");
     leg_nSeeds->AddEntry(h_seed_unmatched, "Unmatched Seeds", "l");
     leg_nSeeds->Draw();
     MuCollStyle::AddStandardLabels(c_nSeeds, "10 TeV");
+    c_nSeeds->Update();
+    double left_min = 0, left_max = h_seed_number->GetMaximum();
+    double right_min = 0, right_max = h_seed_matched->GetMaximum();
+    TGaxis* axis_nSeeds = new TGaxis(
+        h_seed_number->GetXaxis()->GetXmax(), left_min,
+        h_seed_number->GetXaxis()->GetXmax(), left_max,
+        right_min, right_max, 510, "+L"
+    );
+    axis_nSeeds->SetTitle("Events (Matched)");
+    axis_nSeeds->SetTitleOffset(1.2);
+    axis_nSeeds->SetLineColor(kBlack);
+    axis_nSeeds->SetLabelColor(kBlack);
+    axis_nSeeds->SetTitleColor(kBlack);
+    axis_nSeeds->SetLabelFont(h_seed_number->GetYaxis()->GetLabelFont());
+    axis_nSeeds->SetLabelSize(h_seed_number->GetYaxis()->GetLabelSize());
+    axis_nSeeds->SetTitleFont(h_seed_number->GetYaxis()->GetTitleFont());
+    axis_nSeeds->SetTitleSize(h_seed_number->GetYaxis()->GetTitleSize());
+    axis_nSeeds->Draw();
     c_nSeeds->Write();
     
     // Seeds per MCP
@@ -206,40 +261,96 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
     TDirectory* layerDir = outFile->mkdir("LayerDistribution");
     layerDir->cd();
     
-    // Barrel layers
+    // Barrel layers - with matched on right axis
+    scale_factor = 1.0;
+    if (h_seed_layer_barrel->GetMaximum() > 0 && h_seed_layer_barrel_matched->GetMaximum() > 0) {
+        scale_factor = h_seed_layer_barrel->GetMaximum() / h_seed_layer_barrel_matched->GetMaximum();
+        if (scale_factor < 5.0) scale_factor = 5.0;
+    }
+    TH1D* h_seed_layer_barrel_matched_scaled = (TH1D*)h_seed_layer_barrel_matched->Clone("seed_layer_barrel_matched_scaled");
+    h_seed_layer_barrel_matched_scaled->Scale(scale_factor);
+    
     TCanvas* c_barrel = MuCollStyle::CreateCanvas("c_barrel_layers", "Barrel Layer Distribution");
+    adjust_margins(c_barrel);
     MuCollStyle::StyleHist(h_seed_layer_barrel, MuCollStyle::GetColor(0));
-    MuCollStyle::StyleHist(h_seed_layer_barrel_matched, MuCollStyle::GetColor(1));
+    MuCollStyle::StyleHist(h_seed_layer_barrel_matched_scaled, MuCollStyle::GetColor(1));
     MuCollStyle::StyleHist(h_seed_layer_barrel_unmatched, MuCollStyle::GetColor(2));
+    h_seed_layer_barrel_unmatched->SetLineStyle(2);  // Dotted line for unmatched
     h_seed_layer_barrel->GetXaxis()->SetTitle("Layer");
-    h_seed_layer_barrel->GetYaxis()->SetTitle("Hits");
+    h_seed_layer_barrel->GetYaxis()->SetTitle("Hits (All/Unmatched)");
     h_seed_layer_barrel->Draw("HIST");
-    h_seed_layer_barrel_matched->Draw("HIST SAME");
     h_seed_layer_barrel_unmatched->Draw("HIST SAME");
-    TLegend* leg_barrel = new TLegend(0.55, 0.65, 0.88, 0.88);
+    h_seed_layer_barrel_matched_scaled->Draw("HIST SAME");
+    TLegend* leg_barrel = MuCollStyle::CreateLegend(0.45, 0.65, 0.78, 0.88);
     leg_barrel->AddEntry(h_seed_layer_barrel, "All", "l");
-    leg_barrel->AddEntry(h_seed_layer_barrel_matched, "Matched", "l");
+    leg_barrel->AddEntry(h_seed_layer_barrel_matched_scaled, "Matched", "l");
     leg_barrel->AddEntry(h_seed_layer_barrel_unmatched, "Unmatched", "l");
     leg_barrel->Draw();
     MuCollStyle::AddStandardLabels(c_barrel, "10 TeV");
+    c_barrel->Update();
+    left_max = h_seed_layer_barrel->GetMaximum();
+    right_max = h_seed_layer_barrel_matched->GetMaximum();
+    TGaxis* axis_barrel = new TGaxis(
+        h_seed_layer_barrel->GetXaxis()->GetXmax(), left_min,
+        h_seed_layer_barrel->GetXaxis()->GetXmax(), left_max,
+        right_min, right_max, 510, "+L"
+    );
+    axis_barrel->SetTitle("Hits (Matched)");
+    axis_barrel->SetTitleOffset(1.2);
+    axis_barrel->SetLineColor(kBlack);
+    axis_barrel->SetLabelColor(kBlack);
+    axis_barrel->SetTitleColor(kBlack);
+    axis_barrel->SetLabelFont(h_seed_layer_barrel->GetYaxis()->GetLabelFont());
+    axis_barrel->SetLabelSize(h_seed_layer_barrel->GetYaxis()->GetLabelSize());
+    axis_barrel->SetTitleFont(h_seed_layer_barrel->GetYaxis()->GetTitleFont());
+    axis_barrel->SetTitleSize(h_seed_layer_barrel->GetYaxis()->GetTitleSize());
+    axis_barrel->Draw();
     c_barrel->Write();
     
-    // Endcap layers
+    // Endcap layers - with matched on right axis
+    scale_factor = 1.0;
+    if (h_seed_layer_endcap->GetMaximum() > 0 && h_seed_layer_endcap_matched->GetMaximum() > 0) {
+        scale_factor = h_seed_layer_endcap->GetMaximum() / h_seed_layer_endcap_matched->GetMaximum();
+        if (scale_factor < 5.0) scale_factor = 5.0;
+    }
+    TH1D* h_seed_layer_endcap_matched_scaled = (TH1D*)h_seed_layer_endcap_matched->Clone("seed_layer_endcap_matched_scaled");
+    h_seed_layer_endcap_matched_scaled->Scale(scale_factor);
+    
     TCanvas* c_endcap = MuCollStyle::CreateCanvas("c_endcap_layers", "Endcap Layer Distribution");
+    adjust_margins(c_endcap);
     MuCollStyle::StyleHist(h_seed_layer_endcap, MuCollStyle::GetColor(0));
-    MuCollStyle::StyleHist(h_seed_layer_endcap_matched, MuCollStyle::GetColor(1));
+    MuCollStyle::StyleHist(h_seed_layer_endcap_matched_scaled, MuCollStyle::GetColor(1));
     MuCollStyle::StyleHist(h_seed_layer_endcap_unmatched, MuCollStyle::GetColor(2));
+    h_seed_layer_endcap_unmatched->SetLineStyle(2);  // Dotted line for unmatched
     h_seed_layer_endcap->GetXaxis()->SetTitle("Layer");
-    h_seed_layer_endcap->GetYaxis()->SetTitle("Hits");
+    h_seed_layer_endcap->GetYaxis()->SetTitle("Hits (All/Unmatched)");
     h_seed_layer_endcap->Draw("HIST");
-    h_seed_layer_endcap_matched->Draw("HIST SAME");
     h_seed_layer_endcap_unmatched->Draw("HIST SAME");
-    TLegend* leg_endcap = new TLegend(0.55, 0.65, 0.88, 0.88);
+    h_seed_layer_endcap_matched_scaled->Draw("HIST SAME");
+    TLegend* leg_endcap = MuCollStyle::CreateLegend(0.45, 0.65, 0.78, 0.88);
     leg_endcap->AddEntry(h_seed_layer_endcap, "All", "l");
-    leg_endcap->AddEntry(h_seed_layer_endcap_matched, "Matched", "l");
+    leg_endcap->AddEntry(h_seed_layer_endcap_matched_scaled, "Matched", "l");
     leg_endcap->AddEntry(h_seed_layer_endcap_unmatched, "Unmatched", "l");
     leg_endcap->Draw();
     MuCollStyle::AddStandardLabels(c_endcap, "10 TeV");
+    c_endcap->Update();
+    left_max = h_seed_layer_endcap->GetMaximum();
+    right_max = h_seed_layer_endcap_matched->GetMaximum();
+    TGaxis* axis_endcap = new TGaxis(
+        h_seed_layer_endcap->GetXaxis()->GetXmax(), left_min,
+        h_seed_layer_endcap->GetXaxis()->GetXmax(), left_max,
+        right_min, right_max, 510, "+L"
+    );
+    axis_endcap->SetTitle("Hits (Matched)");
+    axis_endcap->SetTitleOffset(1.2);
+    axis_endcap->SetLineColor(kBlack);
+    axis_endcap->SetLabelColor(kBlack);
+    axis_endcap->SetTitleColor(kBlack);
+    axis_endcap->SetLabelFont(h_seed_layer_endcap->GetYaxis()->GetLabelFont());
+    axis_endcap->SetLabelSize(h_seed_layer_endcap->GetYaxis()->GetLabelSize());
+    axis_endcap->SetTitleFont(h_seed_layer_endcap->GetYaxis()->GetTitleFont());
+    axis_endcap->SetTitleSize(h_seed_layer_endcap->GetYaxis()->GetTitleSize());
+    axis_endcap->Draw();
     c_endcap->Write();
     
     // === Resolution plots ===
