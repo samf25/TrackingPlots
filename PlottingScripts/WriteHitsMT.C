@@ -12,7 +12,11 @@
 #include <array>
 
 // Load EDM4hep
+R__LOAD_LIBRARY(libpodio)
+R__LOAD_LIBRARY(libpodioDict)
+R__LOAD_LIBRARY(libpodioRootIO)
 R__LOAD_LIBRARY(libedm4hep)
+R__LOAD_LIBRARY(libedm4hepDict)
 #include "edm4hep/TrackerHitPlaneData.h"
 #include "edm4hep/Vector3d.h"
 

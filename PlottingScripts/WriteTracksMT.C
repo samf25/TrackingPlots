@@ -12,9 +12,11 @@
 #include <atomic>
 
 // Load EDM4hep
-R__LOAD_LIBRARY(libedm4hep)
 R__LOAD_LIBRARY(libpodio)
+R__LOAD_LIBRARY(libpodioDict)
 R__LOAD_LIBRARY(libpodioRootIO)
+R__LOAD_LIBRARY(libedm4hep)
+R__LOAD_LIBRARY(libedm4hepDict)
 #include "edm4hep/MCParticleData.h"
 #include "edm4hep/TrackData.h"
 #include "edm4hep/TrackState.h"
