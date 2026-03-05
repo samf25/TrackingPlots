@@ -54,7 +54,8 @@ static std::vector<std::string> simTrackerHitCollections_MT = {
 
 void ProcessAndWriteSeedFile(const std::string& filename, const char* branchName,
                              TNtuple* ntuple_seeds, TNtuple* ntuple_matched, TNtuple* ntuple_layers, TNtuple* ntuple_events,
-                             std::mutex& writeMutex, std::atomic<Long64_t>& totalEntries) {
+                             std::mutex& writeMutex, std::atomic<Long64_t>& totalEntries,
+                             Long64_t startEntry = 0, Long64_t endEntry = -1) {
     dd4hep::DDSegmentation::BitFieldCoder bitFieldCoder("system:5,side:-2,layer:6,module:11,sensor:8");
     
     TFile* file = TFile::Open(filename.c_str());
@@ -102,7 +103,10 @@ void ProcessAndWriteSeedFile(const std::string& filename, const char* branchName
     }
 
     Long64_t nEntries = tree->GetEntries();
-    totalEntries += nEntries;
+    if (endEntry < 0 || endEntry > nEntries) endEntry = nEntries;
+    if (startEntry < 0) startEntry = 0;
+    if (startEntry > endEntry) startEntry = endEntry;
+    totalEntries += (endEntry - startEntry);
     
     // Local buffers for this file
     std::vector<std::array<float, 2>> seed_data;
@@ -114,7 +118,7 @@ void ProcessAndWriteSeedFile(const std::string& filename, const char* branchName
     layer_data.reserve(nEntries * 20);
     event_data.reserve(nEntries);
     
-    for (Long64_t evt = 0; evt < nEntries; evt++) {
+    for (Long64_t evt = startEntry; evt < endEntry; evt++) {
         tree->GetEntry(evt);
 
         int matchedSeeds = 0, unmatchedSeeds = 0, totalSeeds = 0;
@@ -246,8 +250,31 @@ void WriteSeedsMT(const char* inputFilePrefix, const char* outputFile, const cha
         printf("Error: No files found matching pattern %s*.root\n", inputFilePrefix);
         return;
     }
-    
-    printf("Found %zu files to process with %d threads\n", files.size(), nThreads);
+
+    // Build work chunks so that extra threads can be used within files when few files exist.
+    struct SeedTask {
+        std::string filename;
+        Long64_t start;
+        Long64_t end;
+    };
+    std::vector<SeedTask> tasks;
+    int perFileChunks = std::max(1, nThreads / (int)files.size());
+    for (const auto& fname : files) {
+        TFile tf(fname.c_str());
+        TTree* tt = (TTree*)tf.Get("events");
+        Long64_t nEnt = tt ? tt->GetEntries() : 0;
+        if (nEnt == 0) continue;
+        Long64_t chunkSize = (nEnt + perFileChunks - 1) / perFileChunks;
+        for (Long64_t s = 0; s < nEnt; s += chunkSize) {
+            tasks.push_back({fname, s, std::min(nEnt, s + chunkSize)});
+        }
+    }
+    if (tasks.empty()) {
+        printf("Error: No events found in matched files for prefix %s\n", inputFilePrefix);
+        return;
+    }
+
+    printf("Found %zu files -> %zu tasks with %d threads\n", files.size(), tasks.size(), nThreads);
     
     // Create output file and TNtuples upfront
     TFile* outFile = new TFile(outputFile, "RECREATE");
@@ -258,26 +285,28 @@ void WriteSeedsMT(const char* inputFilePrefix, const char* outputFile, const cha
     TNtuple* ntuple_events = new TNtuple("events_summary", "Event Summary", "nSeeds:nMatched:nUnmatched:avgSeedsPerMCP");
     
     std::mutex writeMutex;
-    std::atomic<int> filesProcessed(0);
-    std::atomic<int> nextFileIdx(0);
+    std::atomic<int> tasksProcessed(0);
+    std::atomic<int> nextTaskIdx(0);
     std::atomic<Long64_t> totalEntries(0);
-    
+
     auto worker = [&]() {
         while (true) {
-            int idx = nextFileIdx.fetch_add(1);
-            if (idx >= (int)files.size()) break;
-            
-            ProcessAndWriteSeedFile(files[idx], branchName, ntuple_seeds, ntuple_matched, ntuple_layers, ntuple_events, writeMutex, totalEntries);
-            int done = filesProcessed.fetch_add(1) + 1;
-            printf("Processed %d/%zu files: %s\n", done, files.size(), files[idx].c_str());
+            int idx = nextTaskIdx.fetch_add(1);
+            if (idx >= (int)tasks.size()) break;
+            const auto& task = tasks[idx];
+            ProcessAndWriteSeedFile(task.filename, branchName, ntuple_seeds, ntuple_matched, ntuple_layers, ntuple_events, writeMutex, totalEntries, task.start, task.end);
+            int done = tasksProcessed.fetch_add(1) + 1;
+            if (done % 10 == 0 || done == (int)tasks.size()) {
+                printf("Processed %d/%zu tasks (file %s, %lld-%lld)\n", done, tasks.size(), task.filename.c_str(), (long long)task.start, (long long)task.end);
+            }
         }
     };
-    
+
     std::vector<std::thread> threads;
-    int actualThreads = std::min(nThreads, (int)files.size());
+    int actualThreads = std::min(nThreads, std::max(1, (int)tasks.size()));
     for (int t = 0; t < actualThreads; t++) threads.emplace_back(worker);
     for (auto& t : threads) t.join();
-    
+
     printf("\nTotal events processed: %lld\n", totalEntries.load());
     printf("Writing to %s...\n", outputFile);
     

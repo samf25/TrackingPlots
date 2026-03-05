@@ -6,7 +6,9 @@
 #include "TLegend.h"
 #include "TStyle.h"
 #include "TROOT.h"
+#include <algorithm>
 #include <iostream>
+#include <vector>
 
 // Include the plot style header
 #include "SimplePlotTemplate.h"
@@ -44,27 +46,35 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     printf("  tracks: %lld entries\n", track_ntuple->GetEntries());
     printf("  matched: %lld entries\n", matched_ntuple->GetEntries());
     
-    // Define binning
-    const int nPtBins = 20;
-    const double ptMin = 0.5;
-    const double ptMax = 110.0;
+    // Define binning (log-spaced pT bins for efficiency/fake-rate plots)
+    const int nPtBins = 12;
+    const double ptMin = 10.0;
+    double ptMax = std::max(ptMin, truth_ntuple->GetMaximum("pt"));
+    if (ptMax <= ptMin) ptMax = ptMin * 10.0;
+    std::vector<double> ptEdges(nPtBins + 1);
+    const double logMin = std::log10(ptMin);
+    const double logMax = std::log10(ptMax);
+    for (int i = 0; i <= nPtBins; ++i) {
+        const double f = static_cast<double>(i) / nPtBins;
+        ptEdges[i] = std::pow(10.0, logMin + f * (logMax - logMin));
+    }
     
-    const int nThetaBins = 20;
+    const int nThetaBins = 12;
     const double thetaMin = 0.0;
     const double thetaMax = 3.14159;
     
     // === Create histograms from ntuples ===
     
     // Efficiency histograms
-    TH1D* h_allTruths_pt = new TH1D("allTruths_pt", "", nPtBins, ptMin, ptMax);
-    TH1D* h_realTruths_pt = new TH1D("realTruths_pt", "", nPtBins, ptMin, ptMax);
+    TH1D* h_allTruths_pt = new TH1D("allTruths_pt", "", nPtBins, ptEdges.data());
+    TH1D* h_realTruths_pt = new TH1D("realTruths_pt", "", nPtBins, ptEdges.data());
     TH1D* h_allTruths_theta = new TH1D("allTruths_theta", "", nThetaBins, thetaMin, thetaMax);
     TH1D* h_realTruths_theta = new TH1D("realTruths_theta", "", nThetaBins, thetaMin, thetaMax);
     
     // Fake rate histograms
-    TH1D* h_allTracks = new TH1D("allTracks", "", nPtBins, ptMin, ptMax);
-    TH1D* h_realTracks = new TH1D("realTracks", "", nPtBins, ptMin, ptMax);
-    TH1D* h_fakeTracks = new TH1D("fakeTracks", "", nPtBins, ptMin, ptMax);
+    TH1D* h_allTracks = new TH1D("allTracks", "", nPtBins, ptEdges.data());
+    TH1D* h_realTracks = new TH1D("realTracks", "", nPtBins, ptEdges.data());
+    TH1D* h_fakeTracks = new TH1D("fakeTracks", "", nPtBins, ptEdges.data());
     
     // Track quality histograms
     TH1D* h_allTracks_nHits = new TH1D("allTracks_nHits", "", 20, 0, 20);
@@ -177,11 +187,14 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     // === Efficiency vs pT ===
     TCanvas* c_eff_pt = MuCollStyle::CreateCanvas("c_eff_pt", "Tracking Efficiency vs p_{T}");
     // Draw a dummy histogram for axes
-    TH1D* h_dummy_pt = new TH1D("h_dummy_pt", "", nPtBins, ptMin, ptMax);
+    TH1D* h_dummy_pt = new TH1D("h_dummy_pt", "", nPtBins, ptEdges.data());
     h_dummy_pt->SetMinimum(0.0);
     h_dummy_pt->SetMaximum(1.1);
     h_dummy_pt->GetXaxis()->SetTitle("p_{T} [GeV]");
     h_dummy_pt->GetYaxis()->SetTitle("Efficiency");
+    c_eff_pt->SetLogx();
+    h_dummy_pt->GetXaxis()->SetMoreLogLabels(kFALSE); // only decades
+    h_dummy_pt->GetXaxis()->SetNdivisions(510, kFALSE);
     h_dummy_pt->Draw("AXIS");
     eff_pt->Draw("SAME APE");
     MuCollStyle::AddStandardLabels(c_eff_pt, "10 TeV");
@@ -204,11 +217,14 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     fakeDir->cd();
 
     TCanvas* c_fake = MuCollStyle::CreateCanvas("c_fake_rate", "Fake Rate vs p_{T}");
-    TH1D* h_dummy_fake = new TH1D("h_dummy_fake", "", nPtBins, ptMin, ptMax);
+    TH1D* h_dummy_fake = new TH1D("h_dummy_fake", "", nPtBins, ptEdges.data());
     h_dummy_fake->SetMinimum(0.0);
     h_dummy_fake->SetMaximum(1.1);
     h_dummy_fake->GetXaxis()->SetTitle("p_{T} [GeV]");
     h_dummy_fake->GetYaxis()->SetTitle("Fake Rate");
+    c_fake->SetLogx();
+    h_dummy_fake->GetXaxis()->SetMoreLogLabels(kFALSE); // only decades
+    h_dummy_fake->GetXaxis()->SetNdivisions(510, kFALSE);
     h_dummy_fake->Draw("AXIS");
     fake_rate->Draw("SAME APE");
     MuCollStyle::AddStandardLabels(c_fake, "10 TeV");
@@ -247,11 +263,15 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     MuCollStyle::StyleHist(h_resolutions_d0, MuCollStyle::GetColor(1));
     MuCollStyle::StyleHist(h_resolutions_z0, MuCollStyle::GetColor(2));
     MuCollStyle::StyleHist(h_resolutions_q_over_pt, MuCollStyle::GetColor(0));
-    h_resolutions_d0->GetXaxis()->SetTitle("Resolution Value");
-    h_resolutions_d0->GetYaxis()->SetTitle("Entries");
-    h_resolutions_d0->Draw("HIST");
-    h_resolutions_z0->Draw("HIST SAME");
-    h_resolutions_q_over_pt->Draw("HIST SAME");
+    std::vector<TH1*> resolutionHists = {h_resolutions_d0, h_resolutions_z0, h_resolutions_q_over_pt};
+    std::sort(resolutionHists.begin(), resolutionHists.end(), [](TH1* a, TH1* b) {
+        return a->GetMaximum() > b->GetMaximum();
+    });
+    resolutionHists.front()->GetXaxis()->SetTitle("Resolution Value");
+    resolutionHists.front()->GetYaxis()->SetTitle("Entries");
+    resolutionHists.front()->Draw("HIST");
+    resolutionHists[1]->Draw("HIST SAME");
+    resolutionHists[2]->Draw("HIST SAME");
     TLegend* leg_res = MuCollStyle::CreateLegend(0.60, 0.75, 0.88, 0.88);
     leg_res->AddEntry(h_resolutions_d0, "#Delta d_{0}", "l");
     leg_res->AddEntry(h_resolutions_z0, "#Delta z_{0}", "l");
@@ -271,11 +291,10 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
         c->SetTicky(0);          // Disable right-side tick marks (we have a custom axis)
     };
 
-    // Scale real tracks for visibility
+    // Scale real tracks for visibility (left axis shows all tracks, right axis shows real tracks)
     double scale_factor = 1.0;
     if (h_allTracks_nHits->GetMaximum() > 0 && h_realTracks_nHits->GetMaximum() > 0) {
         scale_factor = h_allTracks_nHits->GetMaximum() / h_realTracks_nHits->GetMaximum();
-        if (scale_factor < 5.0) scale_factor = 5.0; // Minimum boost for visibility
     }
     TH1D* h_realTracks_nHits_scaled = (TH1D*)h_realTracks_nHits->Clone("realTracks_nHits_scaled");
     h_realTracks_nHits_scaled->Scale(scale_factor);
@@ -290,7 +309,7 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     h_realTracks_nHits_scaled->Draw("HIST SAME");
     TLegend* leg_nHits = MuCollStyle::CreateLegend(0.45, 0.75, 0.78, 0.88);
     leg_nHits->AddEntry(h_allTracks_nHits, "All Tracks", "l");
-    leg_nHits->AddEntry(h_realTracks_nHits_scaled, "Real Tracks", "l");
+    leg_nHits->AddEntry(h_realTracks_nHits_scaled, "Real Tracks (scaled to right axis)", "l");
     leg_nHits->Draw();
     MuCollStyle::AddStandardLabels(c_nHits, "10 TeV");
     c_nHits->Update();
@@ -317,7 +336,6 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     scale_factor = 1.0;
     if (h_allTracks_nHoles->GetMaximum() > 0 && h_realTracks_nHoles->GetMaximum() > 0) {
         scale_factor = h_allTracks_nHoles->GetMaximum() / h_realTracks_nHoles->GetMaximum();
-        if (scale_factor < 5.0) scale_factor = 5.0;
     }
     TH1D* h_realTracks_nHoles_scaled = (TH1D*)h_realTracks_nHoles->Clone("realTracks_nHoles_scaled");
     h_realTracks_nHoles_scaled->Scale(scale_factor);
@@ -332,7 +350,7 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     h_realTracks_nHoles_scaled->Draw("HIST SAME");
     TLegend* leg_nHoles = MuCollStyle::CreateLegend(0.45, 0.75, 0.78, 0.88);
     leg_nHoles->AddEntry(h_allTracks_nHoles, "All Tracks", "l");
-    leg_nHoles->AddEntry(h_realTracks_nHoles_scaled, "Real Tracks", "l");
+    leg_nHoles->AddEntry(h_realTracks_nHoles_scaled, "Real Tracks (scaled to right axis)", "l");
     leg_nHoles->Draw();
     MuCollStyle::AddStandardLabels(c_nHoles, "10 TeV");
     c_nHoles->Update();
@@ -359,7 +377,6 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     scale_factor = 1.0;
     if (h_allTracks_chi2ndof->GetMaximum() > 0 && h_realTracks_chi2ndof->GetMaximum() > 0) {
         scale_factor = h_allTracks_chi2ndof->GetMaximum() / h_realTracks_chi2ndof->GetMaximum();
-        if (scale_factor < 5.0) scale_factor = 5.0;
     }
     TH1D* h_realTracks_chi2ndof_scaled = (TH1D*)h_realTracks_chi2ndof->Clone("realTracks_chi2ndof_scaled");
     h_realTracks_chi2ndof_scaled->Scale(scale_factor);
@@ -374,7 +391,7 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     h_realTracks_chi2ndof_scaled->Draw("HIST SAME");
     TLegend* leg_chi2 = MuCollStyle::CreateLegend(0.45, 0.75, 0.78, 0.88);
     leg_chi2->AddEntry(h_allTracks_chi2ndof, "All Tracks", "l");
-    leg_chi2->AddEntry(h_realTracks_chi2ndof_scaled, "Real Tracks", "l");
+    leg_chi2->AddEntry(h_realTracks_chi2ndof_scaled, "Real Tracks (scaled to right axis)", "l");
     leg_chi2->Draw();
     MuCollStyle::AddStandardLabels(c_chi2, "10 TeV");
     c_chi2->Update();

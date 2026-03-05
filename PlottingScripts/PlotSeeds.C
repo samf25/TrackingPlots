@@ -131,7 +131,8 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
             seed_number_vec.push_back(e_nSeeds);
             seed_matched_vec.push_back(e_nMatched);
             seed_unmatched_vec.push_back(e_nUnmatched);
-            if (e_avgSeedsPerMCP > 0) h_seeds_per_MCP->Fill(e_avgSeedsPerMCP);
+            // Fill even when zero so MCPs without seeds contribute to the 0 bin
+            h_seeds_per_MCP->Fill(e_avgSeedsPerMCP);
         }
     }
     
@@ -190,9 +191,13 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
         maxSeeds = *std::max_element(seed_number_vec.begin(), seed_number_vec.end()) * 1.1;
         if (maxSeeds < 10) maxSeeds = 10;
     }
-    TH1D* h_seed_number = new TH1D("seed_number", "", 50, 0, maxSeeds);
-    TH1D* h_seed_matched = new TH1D("seed_matched", "", 50, 0, maxSeeds);
-    TH1D* h_seed_unmatched = new TH1D("seed_unmatched", "", 50, 0, maxSeeds);
+    int maxSeedsInt = static_cast<int>(std::ceil(maxSeeds));
+    int nSeedBins = maxSeedsInt + 1; // integer binning centered on counts
+    double seedXmin = -0.5;
+    double seedXmax = maxSeedsInt + 0.5;
+    TH1D* h_seed_number = new TH1D("seed_number", "", nSeedBins, seedXmin, seedXmax);
+    TH1D* h_seed_matched = new TH1D("seed_matched", "", nSeedBins, seedXmin, seedXmax);
+    TH1D* h_seed_unmatched = new TH1D("seed_unmatched", "", nSeedBins, seedXmin, seedXmax);
 
     for (size_t i = 0; i < seed_number_vec.size(); ++i) {
         h_seed_number->Fill(seed_number_vec[i]);
@@ -206,7 +211,6 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
     double scale_factor = 1.0;
     if (h_seed_number->GetMaximum() > 0 && h_seed_matched->GetMaximum() > 0) {
         scale_factor = h_seed_number->GetMaximum() / h_seed_matched->GetMaximum();
-        if (scale_factor < 5.0) scale_factor = 5.0;
     }
     TH1D* h_seed_matched_scaled = (TH1D*)h_seed_matched->Clone("seed_matched_scaled");
     h_seed_matched_scaled->Scale(scale_factor);
@@ -265,7 +269,6 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
     scale_factor = 1.0;
     if (h_seed_layer_barrel->GetMaximum() > 0 && h_seed_layer_barrel_matched->GetMaximum() > 0) {
         scale_factor = h_seed_layer_barrel->GetMaximum() / h_seed_layer_barrel_matched->GetMaximum();
-        if (scale_factor < 5.0) scale_factor = 5.0;
     }
     TH1D* h_seed_layer_barrel_matched_scaled = (TH1D*)h_seed_layer_barrel_matched->Clone("seed_layer_barrel_matched_scaled");
     h_seed_layer_barrel_matched_scaled->Scale(scale_factor);
@@ -311,7 +314,6 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
     scale_factor = 1.0;
     if (h_seed_layer_endcap->GetMaximum() > 0 && h_seed_layer_endcap_matched->GetMaximum() > 0) {
         scale_factor = h_seed_layer_endcap->GetMaximum() / h_seed_layer_endcap_matched->GetMaximum();
-        if (scale_factor < 5.0) scale_factor = 5.0;
     }
     TH1D* h_seed_layer_endcap_matched_scaled = (TH1D*)h_seed_layer_endcap_matched->Clone("seed_layer_endcap_matched_scaled");
     h_seed_layer_endcap_matched_scaled->Scale(scale_factor);

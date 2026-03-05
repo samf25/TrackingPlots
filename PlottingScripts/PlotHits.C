@@ -178,13 +178,14 @@ void PlotHits(const char* inputFile, const char* outputFile) {
     float max_layer = std::max({max_VXD, max_IT, max_OT});
 
     // Define histogram binning
-    int nBins = 50;
+    int nBins_total = std::max(1, static_cast<int>(std::ceil(max_total * 1.1)));
+    int nBins_layer = std::max(1, static_cast<int>(std::ceil(max_layer * 1.1)));
 
-    // Create histograms
-    TH1D* h_nHits_total = new TH1D("h_nHits_total", "Total Hits per Event", nBins, 0, max_total * 1.1);
-    TH1D* h_nHits_VXD   = new TH1D("h_nHits_VXD",   "VXD Hits per Event",   nBins, 0, max_layer * 1.1);
-    TH1D* h_nHits_IT    = new TH1D("h_nHits_IT",    "IT Hits per Event",    nBins, 0, max_layer * 1.1);
-    TH1D* h_nHits_OT    = new TH1D("h_nHits_OT",    "OT Hits per Event",    nBins, 0, max_layer * 1.1);
+    // Create histograms with bin counts not exceeding integer xmax
+    TH1D* h_nHits_total = new TH1D("h_nHits_total", "Total Hits per Event", nBins_total, 0, max_total * 1.1);
+    TH1D* h_nHits_VXD   = new TH1D("h_nHits_VXD",   "VXD Hits per Event",   nBins_layer, 0, max_layer * 1.1);
+    TH1D* h_nHits_IT    = new TH1D("h_nHits_IT",    "IT Hits per Event",    nBins_layer, 0, max_layer * 1.1);
+    TH1D* h_nHits_OT    = new TH1D("h_nHits_OT",    "OT Hits per Event",    nBins_layer, 0, max_layer * 1.1);
 
     // Fill histograms
     for (size_t i = 0; i < v_nHits_total.size(); ++i) {

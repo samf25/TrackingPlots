@@ -132,6 +132,22 @@ void ProcessAndWriteTrackFile(const std::string& filename, const char* branchNam
         }
         
         std::vector<bool> trackMatched(trkSet.size(), false);
+        auto chooseTrackStateIndex = [&](const edm4hep::TrackData& trk) -> int {
+            // Prefer the first (begin) state; if its omega is bad, try the last.
+            if (!trackStates) return -1;
+            int begin = trk.trackStates_begin;
+            int end = trk.trackStates_end;
+            if (begin >= 0 && begin < (int)trackStates->size() && std::abs((*trackStates)[begin].omega) > 1e-9) {
+                return begin;
+            }
+            if (end > begin && end - 1 < (int)trackStates->size() && std::abs((*trackStates)[end - 1].omega) > 1e-9) {
+                return end - 1;
+            }
+            return begin; // will be filtered by validity check
+        };
+        auto stateIsValid = [&](int idx) {
+            return idx >= 0 && trackStates && idx < (int)trackStates->size() && std::abs((*trackStates)[idx].omega) > 1e-9;
+        };
         
         // Process MC Relations
         if (toRelations && fromRelations && tracks && trackStates) {
@@ -162,10 +178,12 @@ void ProcessAndWriteTrackFile(const std::string& filename, const char* branchNam
                             float true_d0 = std::sqrt(mcpObj.vertex.x * mcpObj.vertex.x + mcpObj.vertex.y * mcpObj.vertex.y);
                             float true_z0 = mcpObj.vertex.z;
                             
-                            const auto& firstTrackState = (*trackStates)[trkObj.trackStates_begin];
-                            float reco_pt = fabs(0.3 * 5.0 / firstTrackState.omega / 1000);
-                            float reco_d0 = firstTrackState.D0;
-                            float reco_z0 = firstTrackState.Z0;
+                            int stIdx = chooseTrackStateIndex(trkObj);
+                            if (!stateIsValid(stIdx)) continue;
+                            const auto& useState = (*trackStates)[stIdx];
+                            float reco_pt = fabs(0.3 * 5.0 / useState.omega / 1000);
+                            float reco_d0 = useState.D0;
+                            float reco_z0 = useState.Z0;
                             float nHits = trkObj.trackerHits_end - trkObj.trackerHits_begin;
                             float nHoles = trkObj.Nholes;
                             float chi2ndof = (trkObj.ndf > 0) ? trkObj.chi2 / trkObj.ndf : -1;
@@ -182,8 +200,10 @@ void ProcessAndWriteTrackFile(const std::string& filename, const char* branchNam
         // Fill track data
         for (size_t t = 0; t < trkSet.size(); t++) {
             const auto& trk = trkSet[t];
-            const auto& firstTrackState = (*trackStates)[trk.trackStates_begin];
-            float trackPt = fabs(0.3 * 5.0 / firstTrackState.omega / 1000);
+            int stIdx = chooseTrackStateIndex(trk);
+            if (!stateIsValid(stIdx)) continue; // skip pathological states to avoid inf pt
+            const auto& useState = (*trackStates)[stIdx];
+            float trackPt = fabs(0.3 * 5.0 / useState.omega / 1000);
             float nHits = trk.trackerHits_end - trk.trackerHits_begin;
             float nHoles = trk.Nholes;
             float chi2ndof = (trk.ndf > 0) ? trk.chi2 / trk.ndf : -1;
