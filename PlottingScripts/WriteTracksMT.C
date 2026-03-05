@@ -22,9 +22,7 @@ R__LOAD_LIBRARY(libedm4hepDict)
 #include "edm4hep/TrackState.h"
 #include "edm4hep/utils/bit_utils.h"
 #include "podio/ObjectID.h"
-
-static const int BITCreatedInSimulation = 30;
-static const int BITDecayedInTracker = 27;
+#include "SelectionConfig.h"
 
 static std::vector<std::string> GetMatchingFiles_TracksMT(const char* pathPrefix) {
     std::vector<std::string> files;
@@ -45,7 +43,8 @@ static std::vector<std::string> GetMatchingFiles_TracksMT(const char* pathPrefix
 
 void ProcessAndWriteTrackFile(const std::string& filename, const char* branchName, bool isSubsetCollection,
                               TNtuple* ntuple_truth, TNtuple* ntuple_tracks, TNtuple* ntuple_matched, TNtuple* ntuple_events,
-                              std::mutex& writeMutex, std::atomic<Long64_t>& totalEntries) {
+                              std::mutex& writeMutex, std::atomic<Long64_t>& totalEntries,
+                              const EventSelectionConfig& evtSel, const TrackSelectionConfig& trkSel) {
     
     TFile* file = TFile::Open(filename.c_str());
     if (!file || file->IsZombie()) return;
@@ -89,7 +88,31 @@ void ProcessAndWriteTrackFile(const std::string& filename, const char* branchNam
     matched_data.reserve(nEntries * 5);
     event_data.reserve(nEntries);
     
+    TBranch* mcBranch = tree->GetBranch("MCParticles");
+    const bool doEvtSel = EventSelectionIsActive(evtSel);
+
     for (Long64_t i = 0; i < nEntries; i++) {
+        // ── Fast event selection: read only MCParticles first ────
+        if (doEvtSel) {
+            if (!mcBranch) continue; // no MC branch → skip event
+            mcBranch->GetEntry(i);
+            bool evtPasses = false;
+            if (mcParticles) {
+                for (const auto& mcp : *mcParticles) {
+                    if (mcp.generatorStatus != 1) continue;
+                    if (mcp.charge == 0) continue;
+                    if (edm4hep::utils::checkBit(mcp.simulatorStatus, BITCreatedInSimulation)) continue;
+                    if (edm4hep::utils::checkBit(mcp.simulatorStatus, BITDecayedInTracker)) continue;
+                    const edm4hep::Vector3d& mom = mcp.momentum;
+                    float pt    = std::sqrt(mom.x*mom.x + mom.y*mom.y);
+                    float theta = std::atan2(pt, (float)mom.z);
+                    if (MCPassesEventSelection(pt, theta, evtSel)) { evtPasses = true; break; }
+                }
+            }
+            if (!evtPasses) continue;
+        }
+
+        // Full read — only reached when event selection passes
         tree->GetEntry(i);
         
         int nTruths = 0, nMatched = 0, nFake = 0;
@@ -112,8 +135,8 @@ void ProcessAndWriteTrackFile(const std::string& filename, const char* branchNam
                 nTruths++;
             }
         }
-        
-        // Process tracks
+
+        // (Event selection already applied above via fast MCParticles-only read)
         std::vector<edm4hep::TrackData> trkSet;
         std::vector<int> trkIndices;
         if (tracks && trackStates) {
@@ -181,15 +204,23 @@ void ProcessAndWriteTrackFile(const std::string& filename, const char* branchNam
                             int stIdx = chooseTrackStateIndex(trkObj);
                             if (!stateIsValid(stIdx)) continue;
                             const auto& useState = (*trackStates)[stIdx];
-                            float reco_pt = fabs(0.3 * 5.0 / useState.omega / 1000);
-                            float reco_d0 = useState.D0;
-                            float reco_z0 = useState.Z0;
-                            float nHits = trkObj.trackerHits_end - trkObj.trackerHits_begin;
-                            float nHoles = trkObj.Nholes;
-                            float chi2ndof = (trkObj.ndf > 0) ? trkObj.chi2 / trkObj.ndf : -1;
-                            
-                            matched_data.push_back({true_pt, true_theta, (float)mcpObj.charge, reco_pt, 
-                                                   reco_d0, reco_z0, true_d0, true_z0, nHits, nHoles, chi2ndof});
+                            float reco_pt    = fabs(0.3 * 5.0 / useState.omega / 1000);
+                            float reco_theta = std::atan2(1.0f, (float)useState.tanLambda);
+                            float reco_phi   = useState.phi;
+                            float reco_d0    = useState.D0;
+                            float reco_z0    = useState.Z0;
+                            int   iNHits     = trkObj.trackerHits_end - trkObj.trackerHits_begin;
+                            int   iNHoles    = trkObj.Nholes;
+                            float chi2ndof   = (trkObj.ndf > 0) ? trkObj.chi2 / trkObj.ndf : -1;
+
+                            // Apply track selection to matched tracks as well
+                            if (!TrackPassesSelection(reco_pt, reco_theta, reco_phi,
+                                                      reco_d0, reco_z0, chi2ndof,
+                                                      iNHits, iNHoles, trkSel)) continue;
+
+                            matched_data.push_back({true_pt, true_theta, (float)mcpObj.charge, reco_pt,
+                                                   reco_d0, reco_z0, true_d0, true_z0,
+                                                   (float)iNHits, (float)iNHoles, chi2ndof});
                             nMatched++;
                         }
                     }
@@ -203,13 +234,22 @@ void ProcessAndWriteTrackFile(const std::string& filename, const char* branchNam
             int stIdx = chooseTrackStateIndex(trk);
             if (!stateIsValid(stIdx)) continue; // skip pathological states to avoid inf pt
             const auto& useState = (*trackStates)[stIdx];
-            float trackPt = fabs(0.3 * 5.0 / useState.omega / 1000);
-            float nHits = trk.trackerHits_end - trk.trackerHits_begin;
-            float nHoles = trk.Nholes;
-            float chi2ndof = (trk.ndf > 0) ? trk.chi2 / trk.ndf : -1;
+            float trackPt    = fabs(0.3 * 5.0 / useState.omega / 1000);
+            float trackTheta = std::atan2(1.0f, (float)useState.tanLambda);
+            float trackPhi   = useState.phi;
+            float trackD0    = useState.D0;
+            float trackZ0    = useState.Z0;
+            int   iNHits     = trk.trackerHits_end - trk.trackerHits_begin;
+            int   iNHoles    = trk.Nholes;
+            float chi2ndof   = (trk.ndf > 0) ? trk.chi2 / trk.ndf : -1;
+
+            // ── Track selection ──────────────────────────────────
+            if (!TrackPassesSelection(trackPt, trackTheta, trackPhi,
+                                     trackD0, trackZ0, chi2ndof,
+                                     iNHits, iNHoles, trkSel)) continue;
+
             float isReal = trackMatched[t] ? 1.0f : 0.0f;
-            
-            track_data.push_back({trackPt, nHits, nHoles, chi2ndof, isReal});
+            track_data.push_back({trackPt, (float)iNHits, (float)iNHoles, chi2ndof, isReal});
             if (!trackMatched[t]) nFake++;
         }
         
@@ -228,7 +268,11 @@ void ProcessAndWriteTrackFile(const std::string& filename, const char* branchNam
     }
 }
 
-void WriteTracksMT(const char* inputFilePrefix, const char* outputFile, const char* branchName = "SiTrack", bool isSubsetCollection = true, int nThreads = 4) {
+void WriteTracksMT(const char* inputFilePrefix, const char* outputFile,
+                   const char* branchName = "SiTrack", bool isSubsetCollection = true,
+                   int nThreads = 4,
+                   const EventSelectionConfig& evtSel = EventSelectionConfig{},
+                   const TrackSelectionConfig&  trkSel = TrackSelectionConfig{}) {
     
     if (!inputFilePrefix) {
         printf("Usage: WriteTracksMT(\"<path/prefix_>\", \"output.root\", branchName, isSubsetCollection, nThreads)\n");
@@ -264,7 +308,7 @@ void WriteTracksMT(const char* inputFilePrefix, const char* outputFile, const ch
             int idx = nextFileIdx.fetch_add(1);
             if (idx >= (int)files.size()) break;
             
-            ProcessAndWriteTrackFile(files[idx], branchName, isSubsetCollection, ntuple_truth, ntuple_tracks, ntuple_matched, ntuple_events, writeMutex, totalEntries);
+            ProcessAndWriteTrackFile(files[idx], branchName, isSubsetCollection, ntuple_truth, ntuple_tracks, ntuple_matched, ntuple_events, writeMutex, totalEntries, evtSel, trkSel);
             int done = filesProcessed.fetch_add(1) + 1;
             printf("Processed %d/%zu files: %s\n", done, files.size(), files[idx].c_str());
         }

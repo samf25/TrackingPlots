@@ -19,6 +19,9 @@ R__LOAD_LIBRARY(libedm4hep)
 R__LOAD_LIBRARY(libedm4hepDict)
 #include "edm4hep/TrackerHitPlaneData.h"
 #include "edm4hep/Vector3d.h"
+#include "edm4hep/MCParticleData.h"
+#include "edm4hep/utils/bit_utils.h"
+#include "SelectionConfig.h"
 
 static std::vector<std::string> GetMatchingFiles_HitsMT(const char* pathPrefix) {
     std::vector<std::string> files;
@@ -38,8 +41,9 @@ static std::vector<std::string> GetMatchingFiles_HitsMT(const char* pathPrefix) 
 static const char* branchNames_MT[] = {"VXDBarrelHits", "VXDEndcapHits", "ITBarrelHits", "ITEndcapHits", "OTBarrelHits", "OTEndcapHits"};
 static const int layerMapping_MT[] = {0, 0, 1, 1, 2, 2}; // VXD=0, IT=1, OT=2
 
-void ProcessAndWriteHitFile(const std::string& filename, TNtuple* ntuple_hits, TNtuple* ntuple_events, 
-                            std::mutex& writeMutex, std::atomic<Long64_t>& totalEntries) {
+void ProcessAndWriteHitFile(const std::string& filename, TNtuple* ntuple_hits, TNtuple* ntuple_events,
+                            std::mutex& writeMutex, std::atomic<Long64_t>& totalEntries,
+                            const EventSelectionConfig& evtSel) {
     TFile* file = TFile::Open(filename.c_str());
     if (!file || file->IsZombie()) return;
     
@@ -47,9 +51,11 @@ void ProcessAndWriteHitFile(const std::string& filename, TNtuple* ntuple_hits, T
     if (!tree) { file->Close(); return; }
 
     std::vector<std::vector<edm4hep::TrackerHitPlaneData>*> hitCollections(6, nullptr);
+    std::vector<edm4hep::MCParticleData>* mcParticles = nullptr;
     for (int i = 0; i < 6; i++) {
         tree->SetBranchAddress(branchNames_MT[i], &hitCollections[i]);
     }
+    tree->SetBranchAddress("MCParticles", &mcParticles);
     
     Long64_t nEntries = tree->GetEntries();
     totalEntries += nEntries;
@@ -60,9 +66,35 @@ void ProcessAndWriteHitFile(const std::string& filename, TNtuple* ntuple_hits, T
     hit_data.reserve(nEntries * 100);
     event_data.reserve(nEntries);
     
+    TBranch* mcBranch = tree->GetBranch("MCParticles");
+    const bool doEvtSel = EventSelectionIsActive(evtSel);
+
     for (Long64_t evt = 0; evt < nEntries; evt++) {
+        // ── Fast event selection: read only MCParticles first ────
+        if (doEvtSel) {
+            if (!mcBranch) continue;
+            mcBranch->GetEntry(evt);
+            bool evtPasses = false;
+            if (mcParticles) {
+                for (const auto& mcp : *mcParticles) {
+                    if (mcp.generatorStatus != 1) continue;
+                    if (mcp.charge == 0) continue;
+                    if (edm4hep::utils::checkBit(mcp.simulatorStatus, BITCreatedInSimulation)) continue;
+                    if (edm4hep::utils::checkBit(mcp.simulatorStatus, BITDecayedInTracker)) continue;
+                    const edm4hep::Vector3d& mom = mcp.momentum;
+                    float pt    = std::sqrt(mom.x*mom.x + mom.y*mom.y);
+                    float theta = std::atan2(pt, (float)mom.z);
+                    if (MCPassesEventSelection(pt, theta, evtSel)) { evtPasses = true; break; }
+                }
+            }
+            if (!evtPasses) continue;
+        }
+
+        // Full read — only reached when event selection passes
         tree->GetEntry(evt);
         
+        // (Event selection already applied above via fast MCParticles-only read)
+
         int nHits[3] = {0, 0, 0}; // VXD, IT, OT
         
         for (int collIdx = 0; collIdx < 6; collIdx++) {
@@ -94,7 +126,8 @@ void ProcessAndWriteHitFile(const std::string& filename, TNtuple* ntuple_hits, T
     }
 }
 
-void WriteHitsMT(const char* inputFilePrefix, const char* outputFile, int nThreads = 4) {
+void WriteHitsMT(const char* inputFilePrefix, const char* outputFile, int nThreads = 4,
+                 const EventSelectionConfig& evtSel = EventSelectionConfig{}) {
     
     if (!inputFilePrefix) {
         printf("Usage: WriteHitsMT(\"<path/prefix_>\", \"output.root\", nThreads)\n");
@@ -126,7 +159,7 @@ void WriteHitsMT(const char* inputFilePrefix, const char* outputFile, int nThrea
             int idx = nextFileIdx.fetch_add(1);
             if (idx >= (int)files.size()) break;
             
-            ProcessAndWriteHitFile(files[idx], ntuple_hits, ntuple_events, writeMutex, totalEntries);
+            ProcessAndWriteHitFile(files[idx], ntuple_hits, ntuple_events, writeMutex, totalEntries, evtSel);
             int done = filesProcessed.fetch_add(1) + 1;
             printf("Processed %d/%zu files: %s\n", done, files.size(), files[idx].c_str());
         }

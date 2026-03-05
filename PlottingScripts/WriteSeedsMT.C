@@ -24,6 +24,8 @@ R__LOAD_LIBRARY(libedm4hepDict)
 #include "edm4hep/TrackerHitPlaneData.h"
 #include "podio/ObjectID.h"
 #include "podio/utilities/RootHelpers.h"
+#include "edm4hep/utils/bit_utils.h"
+#include "SelectionConfig.h"
 
 static std::vector<std::string> GetMatchingFiles_SeedsMT(const char* pathPrefix) {
     std::vector<std::string> files;
@@ -55,6 +57,7 @@ static std::vector<std::string> simTrackerHitCollections_MT = {
 void ProcessAndWriteSeedFile(const std::string& filename, const char* branchName,
                              TNtuple* ntuple_seeds, TNtuple* ntuple_matched, TNtuple* ntuple_layers, TNtuple* ntuple_events,
                              std::mutex& writeMutex, std::atomic<Long64_t>& totalEntries,
+                             const EventSelectionConfig& evtSel,
                              Long64_t startEntry = 0, Long64_t endEntry = -1) {
     dd4hep::DDSegmentation::BitFieldCoder bitFieldCoder("system:5,side:-2,layer:6,module:11,sensor:8");
     
@@ -118,13 +121,39 @@ void ProcessAndWriteSeedFile(const std::string& filename, const char* branchName
     layer_data.reserve(nEntries * 20);
     event_data.reserve(nEntries);
     
+    TBranch* mcBranch = tree->GetBranch("MCParticles");
+    const bool doEvtSel = EventSelectionIsActive(evtSel);
+
     for (Long64_t evt = startEntry; evt < endEntry; evt++) {
+        // ── Fast event selection: read only MCParticles first ────
+        if (doEvtSel) {
+            if (!mcBranch) continue;
+            mcBranch->GetEntry(evt);
+            bool evtPasses = false;
+            if (mcParticles) {
+                for (const auto& mcp : *mcParticles) {
+                    if (mcp.generatorStatus != 1) continue;
+                    if (mcp.charge == 0) continue;
+                    if (edm4hep::utils::checkBit(mcp.simulatorStatus, BITCreatedInSimulation)) continue;
+                    if (edm4hep::utils::checkBit(mcp.simulatorStatus, BITDecayedInTracker)) continue;
+                    const edm4hep::Vector3d& mom = mcp.momentum;
+                    float pt    = std::sqrt(mom.x*mom.x + mom.y*mom.y);
+                    float theta = std::atan2(pt, (float)mom.z);
+                    if (MCPassesEventSelection(pt, theta, evtSel)) { evtPasses = true; break; }
+                }
+            }
+            if (!evtPasses) continue;
+        }
+
+        // Full read — only reached when event selection passes
         tree->GetEntry(evt);
 
         int matchedSeeds = 0, unmatchedSeeds = 0, totalSeeds = 0;
         std::unordered_map<unsigned int, int> mcpMatchCount;
 
         if (!tracks || !trackStates) continue;
+
+        // (Event selection already applied above via fast MCParticles-only read)
         
         for (const auto& trk : *tracks) {
             totalSeeds++;
@@ -236,7 +265,9 @@ void ProcessAndWriteSeedFile(const std::string& filename, const char* branchName
     }
 }
 
-void WriteSeedsMT(const char* inputFilePrefix, const char* outputFile, const char* branchName = "SeedTracks", int nThreads = 4) {
+void WriteSeedsMT(const char* inputFilePrefix, const char* outputFile,
+                  const char* branchName = "SeedTracks", int nThreads = 4,
+                  const EventSelectionConfig& evtSel = EventSelectionConfig{}) {
     
     if (!inputFilePrefix) {
         printf("Usage: WriteSeedsMT(\"<path/prefix_>\", \"output.root\", branchName, nThreads)\n");
@@ -294,7 +325,7 @@ void WriteSeedsMT(const char* inputFilePrefix, const char* outputFile, const cha
             int idx = nextTaskIdx.fetch_add(1);
             if (idx >= (int)tasks.size()) break;
             const auto& task = tasks[idx];
-            ProcessAndWriteSeedFile(task.filename, branchName, ntuple_seeds, ntuple_matched, ntuple_layers, ntuple_events, writeMutex, totalEntries, task.start, task.end);
+            ProcessAndWriteSeedFile(task.filename, branchName, ntuple_seeds, ntuple_matched, ntuple_layers, ntuple_events, writeMutex, totalEntries, evtSel, task.start, task.end);
             int done = tasksProcessed.fetch_add(1) + 1;
             if (done % 10 == 0 || done == (int)tasks.size()) {
                 printf("Processed %d/%zu tasks (file %s, %lld-%lld)\n", done, tasks.size(), task.filename.c_str(), (long long)task.start, (long long)task.end);
