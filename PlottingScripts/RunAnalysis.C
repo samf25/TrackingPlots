@@ -65,7 +65,7 @@ void RunAnalysis() {
     // Endcap (|η| > 0.7):  absEtaMin = 0.7
     // Barrel (|η| < 0.8):  absEtaMax = 0.8
     evtSel.absEtaMin = 0.0f;                                // no lower cut
-    evtSel.absEtaMax = std::numeric_limits<float>::max();   // no upper cut
+    evtSel.absEtaMax = 0.6f; //std::numeric_limits<float>::max();   // no upper cut
 
     // --- Polar-angle window [radians] -------------------------
     // Use this instead of absEtaMin/absEtaMax if you prefer theta.
@@ -73,7 +73,7 @@ void RunAnalysis() {
     evtSel.thetaMax = (float)M_PI; // rad  (π   = no upper cut)
 
     // --- Transverse-momentum window [GeV] ---------------------
-    evtSel.ptMin = 4000.0f;          // GeV  (0   = no lower cut)
+    evtSel.ptMin = 0.0f;          // GeV  (0   = no lower cut)
     evtSel.ptMax = std::numeric_limits<float>::max(); // GeV (= no upper cut)
 
 
@@ -91,7 +91,7 @@ void RunAnalysis() {
     TrackSelectionConfig trkSel;
 
     // --- Transverse momentum [GeV] ----------------------------
-    trkSel.ptMin = 0.0f;
+    trkSel.ptMin = 0.5f;
     trkSel.ptMax = std::numeric_limits<float>::max();
 
     // --- Absolute pseudorapidity (recommended for barrel/endcap)
@@ -117,7 +117,8 @@ void RunAnalysis() {
     trkSel.z0Max =  std::numeric_limits<float>::max();
 
     // --- Chi-squared per degree of freedom -------------------
-    trkSel.chi2Max = std::numeric_limits<float>::max();
+    trkSel.chi2Min = 0.0f;                               // no lower cut
+    trkSel.chi2Max = std::numeric_limits<float>::max();  // no upper cut
 
     // --- Minimum number of tracker hits ----------------------
     trkSel.nHitsMin = 0;

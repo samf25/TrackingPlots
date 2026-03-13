@@ -88,6 +88,7 @@ struct TrackSelectionConfig {
     float z0Max     =  std::numeric_limits<float>::max();
 
     // --- Track quality ----------------------------------------
+    float chi2Min   =  0.0f;                               // chi2/ndf
     float chi2Max   =  std::numeric_limits<float>::max();  // chi2/ndf
     int   nHitsMin  =  0;
     int   nHolesMax =  std::numeric_limits<int>::max();
@@ -127,16 +128,16 @@ inline bool TrackPassesSelection(float pt, float theta, float phi,
                                  float d0, float z0, float chi2ndof,
                                  int nHits, int nHoles,
                                  const TrackSelectionConfig& cfg) {
-    if (pt    < cfg.ptMin    || pt    > cfg.ptMax)    return false;
-    if (theta < cfg.thetaMin || theta > cfg.thetaMax) return false;
+    if (pt    < cfg.ptMin      || pt    > cfg.ptMax)      return false;
+    if (theta < cfg.thetaMin   || theta > cfg.thetaMax)   return false;
     float absEta = std::abs(ThetaToEta(theta));
     if (absEta < cfg.absEtaMin || absEta > cfg.absEtaMax) return false;
-    if (phi   < cfg.phiMin   || phi   > cfg.phiMax)   return false;
-    if (d0    < cfg.d0Min    || d0    > cfg.d0Max)     return false;
-    if (z0    < cfg.z0Min    || z0    > cfg.z0Max)     return false;
-    if (chi2ndof >= 0 && chi2ndof > cfg.chi2Max)       return false;
-    if (nHits  < cfg.nHitsMin)                         return false;
-    if (nHoles > cfg.nHolesMax)                        return false;
+    if (phi   < cfg.phiMin     || phi   > cfg.phiMax)     return false;
+    if (d0    < cfg.d0Min      || d0    > cfg.d0Max)      return false;
+    if (z0    < cfg.z0Min      || z0    > cfg.z0Max)      return false;
+    if (chi2ndof < cfg.chi2Min || chi2ndof > cfg.chi2Max) return false;
+    if (nHits  < cfg.nHitsMin)                            return false;
+    if (nHoles > cfg.nHolesMax)                           return false;
     return true;
 }
 
