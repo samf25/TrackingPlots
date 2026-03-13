@@ -22,14 +22,14 @@ void RunAnalysis() {
 
     // Path prefix that glob-expands to your reco files.
     // All files matching  <inputFilePrefix>*.root  are processed.
-    const char* inputFilePrefix = "/global/cfs/cdirs/m5197/sferrar2/TrackingPaper/MC/Mu_pgun/reco_mu-_pt10-5000_theta10-170_3";
+    const char* inputFilePrefix = "/global/cfs/cdirs/m5197/sferrar2/TrackingPaper/MC/Mu_pgun_MAIA_v0/reco_mu-_p1-5000_theta15-165_";
 
     // Directory where tracks_ntuple.root, seeds_ntuple.root,
     // and hits_ntuple.root will be written.
-    const char* outputDir = "/global/cfs/cdirs/m5197/sferrar2/TrackingPaper/test";
+    const char* outputDir = "/global/cfs/cdirs/m5197/sferrar2/TrackingPaper/MC/ntuples_Mu_pgun_MAIA_v0/";
 
     // Number of parallel threads.
-    int nThreads = 11;
+    int nThreads = 10;
 
     // Name of the final track collection in the EDM4hep file.
     const char* trackBranch = "SiTrack";
@@ -46,28 +46,29 @@ void RunAnalysis() {
     //
     //  An event is kept if at least one primary MC particle
     //  (generatorStatus==1, charged, stable through tracker)
-    //  satisfies ALL of the pT, theta, and eta windows.
+    //  satisfies ALL of the pT, theta, and |eta| windows.
     //
-    //  Use etaMin/etaMax OR thetaMin/thetaMax for angular cuts
-    //  — applying both simultaneously will double-cut the same
-    //  angle and may have unintended effects.
+    //  Use absEtaMin/absEtaMax OR thetaMin/thetaMax for angular
+    //  cuts — applying both simultaneously will double-cut the
+    //  same angle and may have unintended effects.
     //
     //  Preset examples:
     //    Full acceptance (no cut):  all fields at defaults
-    //    Barrel |η|<0.8:            etaMin=-0.8, etaMax=0.8
-    //    Forward region η>1.5:      etaMin=1.5,  etaMax=FLT_MAX
-    //    High-pT barrel:            etaMin=-0.8, etaMax=0.8, ptMin=5
+    //    Barrel |η|<0.8:            absEtaMax=0.8
+    //    Endcap |η|>0.7:            absEtaMin=0.7
+    //    High-pT barrel:            absEtaMax=0.8, ptMin=5
     // ──────────────────────────────────────────────────────────
 
     EventSelectionConfig evtSel;
 
-    // --- Pseudorapidity window (symmetric about η=0) ----------
-    // Barrel only (|η| < 0.8 corresponds to θ ∈ [0.72, 2.42] rad)
-    evtSel.etaMin = -std::numeric_limits<float>::max(); // no cut
-    evtSel.etaMax =  std::numeric_limits<float>::max(); // no cut
+    // --- Absolute pseudorapidity window ----------------------
+    // Endcap (|η| > 0.7):  absEtaMin = 0.7
+    // Barrel (|η| < 0.8):  absEtaMax = 0.8
+    evtSel.absEtaMin = 0.0f;                                // no lower cut
+    evtSel.absEtaMax = std::numeric_limits<float>::max();   // no upper cut
 
     // --- Polar-angle window [radians] -------------------------
-    // Use this instead of etaMin/etaMax if you prefer theta.
+    // Use this instead of absEtaMin/absEtaMax if you prefer theta.
     evtSel.thetaMin = 0.0f;        // rad  (0   = no lower cut)
     evtSel.thetaMax = (float)M_PI; // rad  (π   = no upper cut)
 
@@ -83,7 +84,7 @@ void RunAnalysis() {
     //  ALL enabled cuts to appear in the output ntuples.
     //  Defaults keep everything.
     //
-    //  As with the event selection, use etaMin/etaMax OR
+    //  As with the event selection, use absEtaMin/absEtaMax OR
     //  thetaMin/thetaMax for angular cuts, not both.
     // ──────────────────────────────────────────────────────────
 
@@ -93,10 +94,11 @@ void RunAnalysis() {
     trkSel.ptMin = 0.0f;
     trkSel.ptMax = std::numeric_limits<float>::max();
 
-    // --- Pseudorapidity (recommended for barrel/endcap) -------
-    // Barrel |η| < 0.8:  etaMin = -0.8,  etaMax = 0.8
-    trkSel.etaMin = -std::numeric_limits<float>::max(); // no cut
-    trkSel.etaMax =  std::numeric_limits<float>::max(); // no cut
+    // --- Absolute pseudorapidity (recommended for barrel/endcap)
+    // Endcap |η| > 0.7:  absEtaMin = 0.7
+    // Barrel |η| < 0.8:  absEtaMax = 0.8
+    trkSel.absEtaMin = 0.0f;                               // no lower cut
+    trkSel.absEtaMax = std::numeric_limits<float>::max();  // no upper cut
 
     // --- Polar angle [rad] (use instead of eta if preferred) --
     trkSel.thetaMin = 0.0f;

@@ -9,7 +9,7 @@
 //  EventSelectionConfig: keep an event if at least one
 //    primary MC particle (generatorStatus==1, charged, not
 //    created in simulation, not decayed in tracker) falls
-//    within the requested pT, theta, AND eta windows.
+//    within the requested pT, theta, AND |eta| windows.
 //
 //  TrackSelectionConfig: keep a reconstructed track if all
 //    specified kinematic and quality cuts are satisfied.
@@ -18,11 +18,11 @@
 //    eta = -ln( tan(theta/2) )
 //    theta = 2 * atan( exp(-eta) )
 //
-//  Barrel selection example (|eta| < 0.8):
-//    cfg.etaMin = -0.8;  cfg.etaMax = 0.8;
+//  Endcap selection example (|eta| > 0.7):
+//    cfg.absEtaMin = 0.7;
 //    (thetaMin / thetaMax can be left at defaults)
 //
-//  NOTE: theta and eta cuts are both applied. Set only one
+//  NOTE: theta and |eta| cuts are both applied. Set only one
 //  set of fields to avoid double-counting the same cut.
 // ============================================================
 
@@ -36,7 +36,7 @@ static const int BITDecayedInTracker    = 27;
 // ─── Event-level selection ────────────────────────────────────
 struct EventSelectionConfig {
     // Retain the event if at least one acceptable primary MC
-    // particle satisfies ALL of the pT, theta, and eta
+    // particle satisfies ALL of the pT, theta, and |eta|
     // requirements simultaneously.
     // Defaults cover the full phase space (no cut).
 
@@ -45,15 +45,15 @@ struct EventSelectionConfig {
     float ptMax    =  std::numeric_limits<float>::max();
 
     // --- Polar-angle window [rad] (0 = beam, π/2 = barrel) ----
-    // Use thetaMin/thetaMax OR etaMin/etaMax, not both.
+    // Use thetaMin/thetaMax OR absEtaMin/absEtaMax, not both.
     float thetaMin =  0.0f;
     float thetaMax =  (float)M_PI;
 
-    // --- Pseudorapidity window --------------------------------
-    // η = -ln(tan(θ/2)).  Barrel |η|<0.8 → etaMin=-0.8, etaMax=0.8
-    // Default: no cut (covers full range).
-    float etaMin   = -std::numeric_limits<float>::max();
-    float etaMax   =  std::numeric_limits<float>::max();
+    // --- Absolute pseudorapidity window ----------------------
+    // |η| = |-ln(tan(θ/2))|.  Endcap |η|>0.7 → absEtaMin=0.7
+    // Barrel |η|<0.8 → absEtaMax=0.8.  Default: no cut.
+    float absEtaMin =  0.0f;
+    float absEtaMax =  std::numeric_limits<float>::max();
 };
 
 // ─── Track-level selection ────────────────────────────────────
@@ -66,14 +66,15 @@ struct TrackSelectionConfig {
     float ptMax     =  std::numeric_limits<float>::max();
 
     // --- Polar angle [rad] ------------------------------------
-    // Use thetaMin/thetaMax OR etaMin/etaMax, not both.
+    // Use thetaMin/thetaMax OR absEtaMin/absEtaMax, not both.
     float thetaMin  =  0.0f;
     float thetaMax  =  (float)M_PI;
 
-    // --- Pseudorapidity ---------------------------------------
-    // η = -ln(tan(θ/2)).  Barrel |η|<0.8 → etaMin=-0.8, etaMax=0.8
-    float etaMin    = -std::numeric_limits<float>::max();
-    float etaMax    =  std::numeric_limits<float>::max();
+    // --- Absolute pseudorapidity ------------------------------
+    // |η| = |-ln(tan(θ/2))|.  Endcap |η|>0.7 → absEtaMin=0.7
+    // Barrel |η|<0.8 → absEtaMax=0.8.  Default: no cut.
+    float absEtaMin =  0.0f;
+    float absEtaMax =  std::numeric_limits<float>::max();
 
     // --- Azimuthal angle [rad] --------------------------------
     float phiMin    = -(float)M_PI;
@@ -104,14 +105,14 @@ inline float ThetaToEta(float theta) {
 }
 
 /// Returns true if a primary MC particle with the given pT and
-/// theta satisfies the event-level selection (pT, theta, eta
+/// theta satisfies the event-level selection (pT, theta, |eta|
 /// windows are all applied simultaneously).
 inline bool MCPassesEventSelection(float pt, float theta,
                                    const EventSelectionConfig& cfg) {
     if (pt    < cfg.ptMin    || pt    > cfg.ptMax)    return false;
     if (theta < cfg.thetaMin || theta > cfg.thetaMax) return false;
-    float eta = ThetaToEta(theta);
-    if (eta   < cfg.etaMin   || eta   > cfg.etaMax)   return false;
+    float absEta = std::abs(ThetaToEta(theta));
+    if (absEta < cfg.absEtaMin || absEta > cfg.absEtaMax) return false;
     return true;
 }
 
@@ -128,8 +129,8 @@ inline bool TrackPassesSelection(float pt, float theta, float phi,
                                  const TrackSelectionConfig& cfg) {
     if (pt    < cfg.ptMin    || pt    > cfg.ptMax)    return false;
     if (theta < cfg.thetaMin || theta > cfg.thetaMax) return false;
-    float eta = ThetaToEta(theta);
-    if (eta   < cfg.etaMin   || eta   > cfg.etaMax)   return false;
+    float absEta = std::abs(ThetaToEta(theta));
+    if (absEta < cfg.absEtaMin || absEta > cfg.absEtaMax) return false;
     if (phi   < cfg.phiMin   || phi   > cfg.phiMax)   return false;
     if (d0    < cfg.d0Min    || d0    > cfg.d0Max)     return false;
     if (z0    < cfg.z0Min    || z0    > cfg.z0Max)     return false;
@@ -146,5 +147,5 @@ inline bool EventSelectionIsActive(const EventSelectionConfig& cfg) {
     const float fmax = std::numeric_limits<float>::max();
     return !(cfg.ptMin    == 0.0f  && cfg.ptMax    == fmax &&
              cfg.thetaMin == 0.0f  && cfg.thetaMax == (float)M_PI &&
-             cfg.etaMin   == -fmax && cfg.etaMax   == fmax);
+             cfg.absEtaMin == 0.0f && cfg.absEtaMax == fmax);
 }
