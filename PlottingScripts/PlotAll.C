@@ -4,7 +4,7 @@
 #include "PlotSeeds.C"
 #include "PlotHits.C"
 
-void PlotAll(const char* inputDir, const char* outputDir) {
+void PlotAll(const char* inputDir, const char* outputDir = "plots/", const TString suffix = "png") {
     
     if (!inputDir || !outputDir) {
         printf("Usage: PlotAll(\"<ntuple_directory>\", \"<output_directory>\")\n");
@@ -25,17 +25,17 @@ void PlotAll(const char* inputDir, const char* outputDir) {
     printf("\n========================================\n");
     printf("Running PlotTracks...\n");
     printf("========================================\n");
-    PlotTracks((inDir + "tracks_ntuple.root").c_str(), (outDir + "tracks_plots.root").c_str());
+    PlotTracks((inDir + "tracks_ntuple.root").c_str(), (outDir + "tracks_plots.root").c_str(), outDir.c_str(), suffix);
     
     printf("\n========================================\n");
     printf("Running PlotSeeds...\n");
     printf("========================================\n");
-    PlotSeeds((inDir + "seeds_ntuple.root").c_str(), (outDir + "seeds_plots.root").c_str());
+    PlotSeeds((inDir + "seeds_ntuple.root").c_str(), (outDir + "seeds_plots.root").c_str(), outDir.c_str(), suffix);
     
     printf("\n========================================\n");
     printf("Running PlotHits...\n");
     printf("========================================\n");
-    PlotHits((inDir + "hits_ntuple.root").c_str(), (outDir + "hits_plots.root").c_str());
+    PlotHits((inDir + "hits_ntuple.root").c_str(), (outDir + "hits_plots.root").c_str(), outDir.c_str(), suffix);
     
     printf("\n========================================\n");
     printf("All plotters complete!\n");

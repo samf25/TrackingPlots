@@ -9,19 +9,25 @@
 #include <algorithm>
 #include <iostream>
 #include <vector>
+#include <filesystem>
 
 // Include the plot style header
 #include "SimplePlotTemplate.h"
 
-void PlotTracks(const char* inputFile, const char* outputFile) {
+void PlotTracks(const char* inputFile, const char* outputFile="tracks_plots.root", const char* outputPath="plots/", const TString suffix="png") {
     // Initialize Muon Collider style
     MuCollStyle::InitializeStyle();
     
-    if (!inputFile || !outputFile) {
-        printf("Usage: PlotTracks(\"tracks.root\", \"output_plots.root\")\n");
+    if (!inputFile) {
+        printf("Usage: PlotTracks(\"tracks.root\")\n");
         return;
     }
-    
+   
+    // Create output directory 
+    std::filesystem::create_directories(outputPath);
+    TString outDir = outputPath;
+    if (!outDir.EndsWith("/")) outDir += "/";
+ 
     // Open input file with ntuples
     TFile* inFile = TFile::Open(inputFile);
     if (!inFile || inFile->IsZombie()) {
@@ -199,6 +205,7 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     eff_pt->Draw("SAME APE");
     MuCollStyle::AddStandardLabels(c_eff_pt, "10 TeV");
     c_eff_pt->Write();
+    c_eff_pt->SaveAs(outDir+"tracks_eff_pt."+suffix);
 
     // === Efficiency vs theta ===
     TCanvas* c_eff_theta = MuCollStyle::CreateCanvas("c_eff_theta", "Tracking Efficiency vs #theta");
@@ -211,6 +218,7 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     eff_theta->Draw("SAME APE");
     MuCollStyle::AddStandardLabels(c_eff_theta, "10 TeV");
     c_eff_theta->Write();
+    c_eff_theta->SaveAs(outDir+"tracks_eff_theta."+suffix);
 
     // === Fake rate vs pT ===
     TDirectory* fakeDir = outFile->mkdir("FakeRate");
@@ -229,6 +237,7 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     fake_rate->Draw("SAME APE");
     MuCollStyle::AddStandardLabels(c_fake, "10 TeV");
     c_fake->Write();
+    c_fake->SaveAs(outDir+"tracks_fake."+suffix);
     
     // === Resolution plots ===
     TDirectory* resDir = outFile->mkdir("Resolutions");
@@ -241,6 +250,7 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     h_resolutions_q_over_pt->Draw("HIST");
     MuCollStyle::AddStandardLabels(c_res_qpt, "10 TeV");
     c_res_qpt->Write();
+    c_res_qpt->SaveAs(outDir+"tracks_res_qpt."+suffix);
 
     TCanvas* c_res_d0 = MuCollStyle::CreateCanvas("c_res_d0", "d_{0} Resolution");
     MuCollStyle::StyleHist(h_resolutions_d0, MuCollStyle::GetColor(1));
@@ -249,6 +259,7 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     h_resolutions_d0->Draw("HIST");
     MuCollStyle::AddStandardLabels(c_res_d0, "10 TeV");
     c_res_d0->Write();
+    c_res_d0->SaveAs(outDir+"tracks_res_d0."+suffix);
 
     TCanvas* c_res_z0 = MuCollStyle::CreateCanvas("c_res_z0", "z_{0} Resolution");
     MuCollStyle::StyleHist(h_resolutions_z0, MuCollStyle::GetColor(2));
@@ -257,6 +268,7 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     h_resolutions_z0->Draw("HIST");
     MuCollStyle::AddStandardLabels(c_res_z0, "10 TeV");
     c_res_z0->Write();
+    c_res_z0->SaveAs(outDir+"tracks_res_z0."+suffix);
 
     // Combined resolution plot (d0, z0, q/pt)
     TCanvas* c_res_all = MuCollStyle::CreateCanvas("c_res_all", "Resolution Comparison");
@@ -279,6 +291,7 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     leg_res->Draw();
     MuCollStyle::AddStandardLabels(c_res_all, "10 TeV");
     c_res_all->Write();
+    c_res_all->SaveAs(outDir+"tracks_res_all."+suffix);
     
     // === Track quality plots ===
     TDirectory* qualDir = outFile->mkdir("TrackQuality");
@@ -331,6 +344,7 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     axis_nHits->SetTitleSize(h_allTracks_nHits->GetYaxis()->GetTitleSize());
     axis_nHits->Draw();
     c_nHits->Write();
+    c_nHits->SaveAs(outDir+"tracks_nHits."+suffix);
 
     // Repeat for nHoles
     scale_factor = 1.0;
@@ -372,6 +386,7 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     axis_nHoles->SetTitleSize(h_allTracks_nHoles->GetYaxis()->GetTitleSize());
     axis_nHoles->Draw();
     c_nHoles->Write();
+    c_nHoles->SaveAs(outDir+"tracks_nHoles."+suffix);
 
     // Repeat for chi2/ndof
     scale_factor = 1.0;
@@ -413,6 +428,7 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     axis_chi2->SetTitleSize(h_allTracks_chi2ndof->GetYaxis()->GetTitleSize());
     axis_chi2->Draw();
     c_chi2->Write();
+    c_chi2->SaveAs(outDir+"tracks_chi2."+suffix);
     
     // Number of tracks per event
     int maxTracks = numberOfTracksVec.empty() ? 50 : static_cast<int>(*std::max_element(numberOfTracksVec.begin(), numberOfTracksVec.end()) * 1.1);
@@ -427,6 +443,7 @@ void PlotTracks(const char* inputFile, const char* outputFile) {
     h_numberOfTracks->Draw("HIST");
     MuCollStyle::AddStandardLabels(c_nTracks, "10 TeV");
     c_nTracks->Write();
+    c_nTracks->SaveAs(outDir+"tracks_nTRacks."+suffix);
     
     // Write raw objects
     outFile->cd();

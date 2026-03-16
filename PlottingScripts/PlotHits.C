@@ -11,15 +11,20 @@
 // Include the plot style header
 #include "SimplePlotTemplate.h"
 
-void PlotHits(const char* inputFile, const char* outputFile) {
+void PlotHits(const char* inputFile, const char* outputFile="hits_plots.root", const char* outputPath="plots/", const TString suffix="png") {
     // Initialize Muon Collider style
     MuCollStyle::InitializeStyle();
     
-    if (!inputFile || !outputFile) {
-        printf("Usage: PlotHits(\"hits.root\", \"output_plots.root\")\n");
+    if (!inputFile) {
+        printf("Usage: PlotHits(\"hits.root\")\n");
         return;
     }
     
+    // Create output directory 
+    std::filesystem::create_directories(outputPath);
+    TString outDir = outputPath;
+    if (!outDir.EndsWith("/")) outDir += "/";
+
     // Open input file with ntuples
     TFile* inFile = TFile::Open(inputFile);
     if (!inFile || inFile->IsZombie()) {
@@ -118,6 +123,7 @@ void PlotHits(const char* inputFile, const char* outputFile) {
         leg->Draw();
         
         c->Write();
+        c->SaveAs(Form(outDir+"hits_%s."+suffix, layerNames[layer]));
     }
     
     // Combined plot
@@ -145,6 +151,7 @@ void PlotHits(const char* inputFile, const char* outputFile) {
     
     MuCollStyle::AddStandardLabels(c_combined, "10 TeV");
     c_combined->Write();
+    c_combined->SaveAs(outDir+"hits_combined_hits."+suffix);
     
     // === Event summary plots ===
     TDirectory* evtDir = outFile->mkdir("EventSummary");
@@ -202,6 +209,7 @@ void PlotHits(const char* inputFile, const char* outputFile) {
     h_nHits_total->Draw("HIST");
     MuCollStyle::AddStandardLabels(c_total, "10 TeV");
     c_total->Write();
+    c_total->SaveAs(outDir+"hits_total_hits."+suffix);
     
     TCanvas* c_layers = MuCollStyle::CreateCanvas("c_layer_hits", "Hits per Event by Layer");
     MuCollStyle::StyleHist(h_nHits_VXD, MuCollStyle::GetColor(0));
@@ -227,6 +235,7 @@ void PlotHits(const char* inputFile, const char* outputFile) {
     leg_layers->Draw();
     MuCollStyle::AddStandardLabels(c_layers, "10 TeV");
     c_layers->Write();
+    c_layers->SaveAs(outDir+"hits_layer_hits."+suffix);
     
     outFile->Write();
     outFile->Close();
