@@ -12,15 +12,20 @@
 // Include the plot style header
 #include "SimplePlotTemplate.h"
 
-void PlotSeeds(const char* inputFile, const char* outputFile) {
+void PlotSeeds(const char* inputFile, const char* outputFile="seeds_plots.root", const char* outputPath="plots/", const TString suffix="png") {
     // Initialize Muon Collider style
     MuCollStyle::InitializeStyle();
     
-    if (!inputFile || !outputFile) {
-        printf("Usage: PlotSeeds(\"seeds.root\", \"output_plots.root\")\n");
+    if (!inputFile) {
+        printf("Usage: PlotSeeds(\"seeds.root\")\n");
         return;
     }
     
+    // Create output directory 
+    std::filesystem::create_directories(outputPath);
+    TString outDir = outputPath;
+    if (!outDir.EndsWith("/")) outDir += "/";
+
     // Open input file with ntuples
     TFile* inFile = TFile::Open(inputFile);
     if (!inFile || inFile->IsZombie()) {
@@ -183,6 +188,7 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
     h_seed_theta->Draw("HIST");
     MuCollStyle::AddStandardLabels(c_theta, "10 TeV");
     c_theta->Write();
+    c_theta->SaveAs(outDir+"seeds_theta."+suffix);
     
     // Seeds per event - with matched on right axis
     // Determine histogram range from data
@@ -251,6 +257,7 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
     axis_nSeeds->SetTitleSize(h_seed_number->GetYaxis()->GetTitleSize());
     axis_nSeeds->Draw();
     c_nSeeds->Write();
+    c_nSeeds->SaveAs(outDir+"seeds_nSeeds."+suffix);
     
     // Seeds per MCP
     TCanvas* c_perMCP = MuCollStyle::CreateCanvas("c_seeds_per_MCP", "Seeds per MC Particle");
@@ -260,6 +267,7 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
     h_seeds_per_MCP->Draw("HIST");
     MuCollStyle::AddStandardLabels(c_perMCP, "10 TeV");
     c_perMCP->Write();
+    c_perMCP->SaveAs(outDir+"seeds_perMCP."+suffix);
     
     // === Layer distribution plots ===
     TDirectory* layerDir = outFile->mkdir("LayerDistribution");
@@ -309,6 +317,7 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
     axis_barrel->SetTitleSize(h_seed_layer_barrel->GetYaxis()->GetTitleSize());
     axis_barrel->Draw();
     c_barrel->Write();
+    c_barrel->SaveAs(outDir+"seeds_barrel."+suffix);
     
     // Endcap layers - with matched on right axis
     scale_factor = 1.0;
@@ -354,6 +363,7 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
     axis_endcap->SetTitleSize(h_seed_layer_endcap->GetYaxis()->GetTitleSize());
     axis_endcap->Draw();
     c_endcap->Write();
+    c_endcap->SaveAs(outDir+"seeds_endcap."+suffix);
     
     // === Resolution plots ===
     TDirectory* resDir = outFile->mkdir("Resolutions");
@@ -366,6 +376,7 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
     h_resolutions_q_over_pt->Draw("HIST");
     MuCollStyle::AddStandardLabels(c_res_qpt, "10 TeV");
     c_res_qpt->Write();
+    c_res_qpt->SaveAs(outDir+"seeds_res_qpt."+suffix);
     
     TCanvas* c_res_d0 = MuCollStyle::CreateCanvas("c_seed_res_d0", "Seed d_{0} Resolution");
     MuCollStyle::StyleHist(h_resolutions_d0, MuCollStyle::GetColor(1));
@@ -374,6 +385,7 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
     h_resolutions_d0->Draw("HIST");
     MuCollStyle::AddStandardLabels(c_res_d0, "10 TeV");
     c_res_d0->Write();
+    c_res_d0->SaveAs(outDir+"seeds_res_d0."+suffix);
     
     TCanvas* c_res_z0 = MuCollStyle::CreateCanvas("c_seed_res_z0", "Seed z_{0} Resolution");
     MuCollStyle::StyleHist(h_resolutions_z0, MuCollStyle::GetColor(2));
@@ -382,6 +394,7 @@ void PlotSeeds(const char* inputFile, const char* outputFile) {
     h_resolutions_z0->Draw("HIST");
     MuCollStyle::AddStandardLabels(c_res_z0, "10 TeV");
     c_res_z0->Write();
+    c_res_z0->SaveAs(outDir+"seeds_res_z0."+suffix);
     
     outFile->Write();
     outFile->Close();
