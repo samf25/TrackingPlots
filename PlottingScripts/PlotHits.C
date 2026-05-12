@@ -185,8 +185,8 @@ void PlotHits(const char* inputFile, const char* outputFile="hits_plots.root", c
     float max_layer = std::max({max_VXD, max_IT, max_OT});
 
     // Define histogram binning
-    int nBins_total = std::max(1, static_cast<int>(std::ceil(max_total * 1.1)));
-    int nBins_layer = std::max(1, static_cast<int>(std::ceil(max_layer * 1.1)));
+    int nBins_total = 100; // std::max(1, static_cast<int>(std::ceil(max_total * 1.1)));
+    int nBins_layer = 100; //std::max(1, static_cast<int>(std::ceil(max_layer * 1.1)));
 
     // Create histograms with bin counts not exceeding integer xmax
     TH1D* h_nHits_total = new TH1D("h_nHits_total", "Total Hits per Event", nBins_total, 0, max_total * 1.1);

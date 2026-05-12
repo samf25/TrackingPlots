@@ -198,9 +198,9 @@ void PlotSeeds(const char* inputFile, const char* outputFile="seeds_plots.root",
         if (maxSeeds < 10) maxSeeds = 10;
     }
     int maxSeedsInt = static_cast<int>(std::ceil(maxSeeds));
-    int nSeedBins = maxSeedsInt + 1; // integer binning centered on counts
-    double seedXmin = -0.5;
-    double seedXmax = maxSeedsInt + 0.5;
+    int nSeedBins = 100; 
+    double seedXmin = 0;
+    double seedXmax = maxSeedsInt;
     TH1D* h_seed_number = new TH1D("seed_number", "", nSeedBins, seedXmin, seedXmax);
     TH1D* h_seed_matched = new TH1D("seed_matched", "", nSeedBins, seedXmin, seedXmax);
     TH1D* h_seed_unmatched = new TH1D("seed_unmatched", "", nSeedBins, seedXmin, seedXmax);

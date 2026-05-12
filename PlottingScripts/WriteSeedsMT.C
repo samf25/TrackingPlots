@@ -226,7 +226,7 @@ void ProcessAndWriteSeedFile(const std::string& filename, const char* branchName
                 float true_d0 = std::sqrt(matchedMCP.vertex.x * matchedMCP.vertex.x + matchedMCP.vertex.y * matchedMCP.vertex.y);
                 float true_z0 = matchedMCP.vertex.z;
                 
-                float reco_pt = fabs(0.3 * 3.57 / firstTrackState.omega / 1000);
+                float reco_pt = fabs(0.3 * 5.0 / firstTrackState.omega / 1000);
                 float reco_d0 = firstTrackState.D0;
                 float reco_z0 = firstTrackState.Z0;
                 
