@@ -1,136 +1,168 @@
 // ============================================================
 //  RunAnalysis.C  –  Steering file for NTuple writing
 //
-//  Edit the sections below to configure:
-//    ① Input / output paths and processing options
-//    ② Event-level selection (filter events by MC particle)
-//    ③ Track-level selection (filter reconstructed tracks)
+//  Configure all runtime options in an external .conf file and
+//  pass it to RunAnalysis(configPath).
 //
-//  Run with:
+//  Run with default config in current working directory:
 //    root -l -q RunAnalysis.C
-//  or interactively:
-//    root -l RunAnalysis.C
+//
+//  Run with an explicit config file:
+//    root -l -q 'RunAnalysis.C("RunAnalysis.conf")'
 // ============================================================
 
 #include "WriteAllMT.C"   // pulls in all sub-writers + SelectionConfig.h
 
-void RunAnalysis() {
+#include <limits>
+#include <string>
 
-    // ──────────────────────────────────────────────────────────
-    //  ① INPUT / OUTPUT  — edit these paths
-    // ──────────────────────────────────────────────────────────
+#include "TEnv.h"
 
-    // Path prefix that glob-expands to your reco files.
-    // All files matching  <inputFilePrefix>*.root  are processed.
-    const char* inputFilePrefix = "/global/cfs/cdirs/m5197/sferrar2/TrackingPaper/MC/Mu_pgun_MAIA_v0/reco_mu-_p1-5000_theta15-165_";
-
-    // Directory where tracks_ntuple.root, seeds_ntuple.root,
-    // and hits_ntuple.root will be written.
-    const char* outputDir = "/global/cfs/cdirs/m5197/sferrar2/TrackingPaper/MC/ntuples_Mu_pgun_MAIA_v0/";
-
-    // Number of parallel threads.
-    int nThreads = 10;
-
-    // Name of the final track collection in the EDM4hep file.
-    const char* trackBranch = "SiTrack";
-
-    // Is the track collection a subset (index) collection?
+struct AnalysisConfig {
+    std::string inputFilePrefix;
+    std::string outputDir;
+    int nThreads = 4;
+    std::string trackBranch;
     bool isSubsetCollection = true;
-
-    // Name of the seed-track collection.
-    const char* seedBranch = "SeedTracks";
-
-
-    // ──────────────────────────────────────────────────────────
-    //  ② EVENT SELECTION
-    //
-    //  An event is kept if at least one primary MC particle
-    //  (generatorStatus==1, charged, stable through tracker)
-    //  satisfies ALL of the pT, theta, and |eta| windows.
-    //
-    //  Use absEtaMin/absEtaMax OR thetaMin/thetaMax for angular
-    //  cuts — applying both simultaneously will double-cut the
-    //  same angle and may have unintended effects.
-    //
-    //  Preset examples:
-    //    Full acceptance (no cut):  all fields at defaults
-    //    Barrel |η|<0.8:            absEtaMax=0.8
-    //    Endcap |η|>0.7:            absEtaMin=0.7
-    //    High-pT barrel:            absEtaMax=0.8, ptMin=5
-    // ──────────────────────────────────────────────────────────
-
+    std::string seedBranch;
     EventSelectionConfig evtSel;
-
-    // --- Absolute pseudorapidity window ----------------------
-    // Endcap (|η| > 0.7):  absEtaMin = 0.7
-    // Barrel (|η| < 0.8):  absEtaMax = 0.8
-    evtSel.absEtaMin = 0.0f;                                // no lower cut
-    evtSel.absEtaMax = 0.6f; //std::numeric_limits<float>::max();   // no upper cut
-
-    // --- Polar-angle window [radians] -------------------------
-    // Use this instead of absEtaMin/absEtaMax if you prefer theta.
-    evtSel.thetaMin = 0.0f;        // rad  (0   = no lower cut)
-    evtSel.thetaMax = (float)M_PI; // rad  (π   = no upper cut)
-
-    // --- Transverse-momentum window [GeV] ---------------------
-    evtSel.ptMin = 0.0f;          // GeV  (0   = no lower cut)
-    evtSel.ptMax = std::numeric_limits<float>::max(); // GeV (= no upper cut)
-
-
-    // ──────────────────────────────────────────────────────────
-    //  ③ TRACK SELECTION
-    //
-    //  Applied to every reconstructed track.  A track must pass
-    //  ALL enabled cuts to appear in the output ntuples.
-    //  Defaults keep everything.
-    //
-    //  As with the event selection, use absEtaMin/absEtaMax OR
-    //  thetaMin/thetaMax for angular cuts, not both.
-    // ──────────────────────────────────────────────────────────
-
     TrackSelectionConfig trkSel;
+};
 
-    // --- Transverse momentum [GeV] ----------------------------
-    trkSel.ptMin = 0.5f;
-    trkSel.ptMax = std::numeric_limits<float>::max();
+AnalysisConfig DefaultAnalysisConfig() {
+    AnalysisConfig cfg;
 
-    // --- Absolute pseudorapidity (recommended for barrel/endcap)
-    // Endcap |η| > 0.7:  absEtaMin = 0.7
-    // Barrel |η| < 0.8:  absEtaMax = 0.8
-    trkSel.absEtaMin = 0.0f;                               // no lower cut
-    trkSel.absEtaMax = std::numeric_limits<float>::max();  // no upper cut
+    cfg.inputFilePrefix = "/global/cfs/cdirs/m5197/sferrar2/TrackingPaper/MC/Mu_pgun_MAIA_v0/reco_mu-_p1-5000_theta15-165_";
+    cfg.outputDir = "/global/cfs/cdirs/m5197/sferrar2/TrackingPaper/MC/ntuples_Mu_pgun_MAIA_v0_ENDCAP";
+    cfg.nThreads = 50;
+    cfg.trackBranch = "SiTrack";
+    cfg.isSubsetCollection = true;
+    cfg.seedBranch = "SeedTracks";
 
-    // --- Polar angle [rad] (use instead of eta if preferred) --
-    trkSel.thetaMin = 0.0f;
-    trkSel.thetaMax = (float)M_PI;
+    cfg.evtSel.absEtaMin = 0.7f;
+    cfg.evtSel.absEtaMax = std::numeric_limits<float>::max();
+    cfg.evtSel.thetaMin  = 0.0f;
+    cfg.evtSel.thetaMax  = (float)M_PI;
+    cfg.evtSel.ptMin     = 0.0f;
+    cfg.evtSel.ptMax     = std::numeric_limits<float>::max();
 
-    // --- Azimuthal angle (phi from track state) [rad] ---------
-    trkSel.phiMin = -(float)M_PI;
-    trkSel.phiMax =  (float)M_PI;
+    cfg.trkSel.ptMin     = 0.5f;
+    cfg.trkSel.ptMax     = std::numeric_limits<float>::max();
+    cfg.trkSel.absEtaMin = 0.0f;
+    cfg.trkSel.absEtaMax = std::numeric_limits<float>::max();
+    cfg.trkSel.thetaMin  = 0.0f;
+    cfg.trkSel.thetaMax  = (float)M_PI;
+    cfg.trkSel.phiMin    = -(float)M_PI;
+    cfg.trkSel.phiMax    =  (float)M_PI;
+    cfg.trkSel.d0Min     = -std::numeric_limits<float>::max();
+    cfg.trkSel.d0Max     =  std::numeric_limits<float>::max();
+    cfg.trkSel.z0Min     = -std::numeric_limits<float>::max();
+    cfg.trkSel.z0Max     =  std::numeric_limits<float>::max();
+    cfg.trkSel.chi2Min   = 0.0f;
+    cfg.trkSel.chi2Max   = std::numeric_limits<float>::max();
+    cfg.trkSel.nHitsMin  = 0;
+    cfg.trkSel.nHolesMax = std::numeric_limits<int>::max();
 
-    // --- Transverse impact parameter D0 [mm] ------------------
-    trkSel.d0Min = -std::numeric_limits<float>::max();
-    trkSel.d0Max =  std::numeric_limits<float>::max();
+    return cfg;
+}
 
-    // --- Longitudinal impact parameter Z0 [mm] ----------------
-    trkSel.z0Min = -std::numeric_limits<float>::max();
-    trkSel.z0Max =  std::numeric_limits<float>::max();
+bool LoadAnalysisConfig(const char* configPath, AnalysisConfig& cfg) {
+    if (!configPath || !configPath[0]) {
+        printf("ERROR: Empty config path.\n");
+        return false;
+    }
 
-    // --- Chi-squared per degree of freedom -------------------
-    trkSel.chi2Min = 0.0f;                               // no lower cut
-    trkSel.chi2Max = std::numeric_limits<float>::max();  // no upper cut
+    TEnv env;
+    if (env.ReadFile(configPath, kEnvLocal) != 0) {
+        printf("ERROR: Failed to read config file: %s\n", configPath);
+        return false;
+    }
 
-    // --- Minimum number of tracker hits ----------------------
-    trkSel.nHitsMin = 0;
+    cfg.inputFilePrefix = env.GetValue("io.inputFilePrefix", cfg.inputFilePrefix.c_str());
+    cfg.outputDir = env.GetValue("io.outputDir", cfg.outputDir.c_str());
+    cfg.nThreads = env.GetValue("io.nThreads", cfg.nThreads);
+    cfg.trackBranch = env.GetValue("io.trackBranch", cfg.trackBranch.c_str());
+    cfg.isSubsetCollection = env.GetValue("io.isSubsetCollection", cfg.isSubsetCollection ? 1 : 0) != 0;
+    cfg.seedBranch = env.GetValue("io.seedBranch", cfg.seedBranch.c_str());
 
-    // --- Maximum number of holes (missing expected hits) ------
-    trkSel.nHolesMax = std::numeric_limits<int>::max();
+    cfg.evtSel.ptMin = env.GetValue("event.ptMin", cfg.evtSel.ptMin);
+    cfg.evtSel.ptMax = env.GetValue("event.ptMax", cfg.evtSel.ptMax);
+    cfg.evtSel.thetaMin = env.GetValue("event.thetaMin", cfg.evtSel.thetaMin);
+    cfg.evtSel.thetaMax = env.GetValue("event.thetaMax", cfg.evtSel.thetaMax);
+    cfg.evtSel.absEtaMin = env.GetValue("event.absEtaMin", cfg.evtSel.absEtaMin);
+    cfg.evtSel.absEtaMax = env.GetValue("event.absEtaMax", cfg.evtSel.absEtaMax);
 
+    cfg.trkSel.ptMin = env.GetValue("track.ptMin", cfg.trkSel.ptMin);
+    cfg.trkSel.ptMax = env.GetValue("track.ptMax", cfg.trkSel.ptMax);
+    cfg.trkSel.thetaMin = env.GetValue("track.thetaMin", cfg.trkSel.thetaMin);
+    cfg.trkSel.thetaMax = env.GetValue("track.thetaMax", cfg.trkSel.thetaMax);
+    cfg.trkSel.absEtaMin = env.GetValue("track.absEtaMin", cfg.trkSel.absEtaMin);
+    cfg.trkSel.absEtaMax = env.GetValue("track.absEtaMax", cfg.trkSel.absEtaMax);
+    cfg.trkSel.phiMin = env.GetValue("track.phiMin", cfg.trkSel.phiMin);
+    cfg.trkSel.phiMax = env.GetValue("track.phiMax", cfg.trkSel.phiMax);
+    cfg.trkSel.d0Min = env.GetValue("track.d0Min", cfg.trkSel.d0Min);
+    cfg.trkSel.d0Max = env.GetValue("track.d0Max", cfg.trkSel.d0Max);
+    cfg.trkSel.z0Min = env.GetValue("track.z0Min", cfg.trkSel.z0Min);
+    cfg.trkSel.z0Max = env.GetValue("track.z0Max", cfg.trkSel.z0Max);
+    cfg.trkSel.chi2Min = env.GetValue("track.chi2Min", cfg.trkSel.chi2Min);
+    cfg.trkSel.chi2Max = env.GetValue("track.chi2Max", cfg.trkSel.chi2Max);
+    cfg.trkSel.nHitsMin = env.GetValue("track.nHitsMin", cfg.trkSel.nHitsMin);
+    cfg.trkSel.nHolesMax = env.GetValue("track.nHolesMax", cfg.trkSel.nHolesMax);
 
-    // ──────────────────────────────────────────────────────────
-    //  Run
-    // ──────────────────────────────────────────────────────────
-    WriteAllMT(inputFilePrefix, outputDir, nThreads,
-               trackBranch, isSubsetCollection, seedBranch,
-               evtSel, trkSel);
+    if (cfg.inputFilePrefix.empty()) {
+        printf("ERROR: io.inputFilePrefix is empty in %s\n", configPath);
+        return false;
+    }
+
+    return true;
+}
+
+void PrintLoadedConfig(const AnalysisConfig& cfg, const char* configPath) {
+    printf("============================================\n");
+    printf("Loaded analysis config: %s\n", configPath);
+    printf("============================================\n");
+    printf("io.inputFilePrefix     = %s\n", cfg.inputFilePrefix.c_str());
+    printf("io.outputDir           = %s\n", cfg.outputDir.c_str());
+    printf("io.nThreads            = %d\n", cfg.nThreads);
+    printf("io.trackBranch         = %s\n", cfg.trackBranch.c_str());
+    printf("io.isSubsetCollection  = %d\n", cfg.isSubsetCollection ? 1 : 0);
+    printf("io.seedBranch          = %s\n", cfg.seedBranch.c_str());
+
+    printf("event.ptMin            = %g\n", cfg.evtSel.ptMin);
+    printf("event.ptMax            = %g\n", cfg.evtSel.ptMax);
+    printf("event.thetaMin         = %g\n", cfg.evtSel.thetaMin);
+    printf("event.thetaMax         = %g\n", cfg.evtSel.thetaMax);
+    printf("event.absEtaMin        = %g\n", cfg.evtSel.absEtaMin);
+    printf("event.absEtaMax        = %g\n", cfg.evtSel.absEtaMax);
+
+    printf("track.ptMin            = %g\n", cfg.trkSel.ptMin);
+    printf("track.ptMax            = %g\n", cfg.trkSel.ptMax);
+    printf("track.thetaMin         = %g\n", cfg.trkSel.thetaMin);
+    printf("track.thetaMax         = %g\n", cfg.trkSel.thetaMax);
+    printf("track.absEtaMin        = %g\n", cfg.trkSel.absEtaMin);
+    printf("track.absEtaMax        = %g\n", cfg.trkSel.absEtaMax);
+    printf("track.phiMin           = %g\n", cfg.trkSel.phiMin);
+    printf("track.phiMax           = %g\n", cfg.trkSel.phiMax);
+    printf("track.d0Min            = %g\n", cfg.trkSel.d0Min);
+    printf("track.d0Max            = %g\n", cfg.trkSel.d0Max);
+    printf("track.z0Min            = %g\n", cfg.trkSel.z0Min);
+    printf("track.z0Max            = %g\n", cfg.trkSel.z0Max);
+    printf("track.chi2Min          = %g\n", cfg.trkSel.chi2Min);
+    printf("track.chi2Max          = %g\n", cfg.trkSel.chi2Max);
+    printf("track.nHitsMin         = %d\n", cfg.trkSel.nHitsMin);
+    printf("track.nHolesMax        = %d\n", cfg.trkSel.nHolesMax);
+    printf("============================================\n\n");
+}
+
+void RunAnalysis(const char* configPath = "RunAnalysis.conf") {
+    AnalysisConfig cfg = DefaultAnalysisConfig();
+    if (!LoadAnalysisConfig(configPath, cfg)) {
+        return;
+    }
+
+    PrintLoadedConfig(cfg, configPath);
+
+    WriteAllMT(cfg.inputFilePrefix.c_str(), cfg.outputDir.c_str(), cfg.nThreads,
+               cfg.trackBranch.c_str(), cfg.isSubsetCollection, cfg.seedBranch.c_str(),
+               cfg.evtSel, cfg.trkSel);
 }
