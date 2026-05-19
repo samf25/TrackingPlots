@@ -7,7 +7,10 @@ void WriteAllMT(const char* inputFilePrefix, const char* outputDir = ".", int nT
                 const char* trackBranch = "SiTrack", bool isSubsetCollection = true,
                 const char* seedBranch = "SeedTracks",
                 const EventSelectionConfig& evtSel = EventSelectionConfig{},
-                const TrackSelectionConfig&  trkSel = TrackSelectionConfig{}) {
+                const TrackSelectionConfig&  trkSel = TrackSelectionConfig{},
+                int nThreadsTracks = -1,
+                int nThreadsSeeds = -1,
+                int nThreadsHits = -1) {
     
     if (!inputFilePrefix) {
         printf("Usage: WriteAllMT(\"<path/prefix_>\", \"output_dir\", nThreads, \"trackBranch\", isSubset, \"seedBranch\", evtSel, trkSel)\n");
@@ -25,21 +28,27 @@ void WriteAllMT(const char* inputFilePrefix, const char* outputDir = ".", int nT
     TString trackOutput = TString::Format("%s/tracks_ntuple.root", outputDir);
     TString seedOutput  = TString::Format("%s/seeds_ntuple.root",  outputDir);
     TString hitOutput   = TString::Format("%s/hits_ntuple.root",   outputDir);
+    const int threadsTracks = (nThreadsTracks > 0) ? nThreadsTracks : nThreads;
+    const int threadsSeeds  = (nThreadsSeeds > 0)  ? nThreadsSeeds  : nThreads;
+    const int threadsHits   = (nThreadsHits > 0)   ? nThreadsHits   : nThreads;
     
     printf("============================================\n");
-    printf("Running multithreaded NTuple writers with %d threads\n", nThreads);
+    printf("Running multithreaded NTuple writers\n");
+    printf("  tracks threads: %d\n", threadsTracks);
+    printf("  seeds  threads: %d\n", threadsSeeds);
+    printf("  hits   threads: %d\n", threadsHits);
     printf("============================================\n\n");
     
     printf("=== Writing Tracks ===\n");
-    WriteTracksMT(inputFilePrefix, trackOutput.Data(), trackBranch, isSubsetCollection, nThreads, evtSel, trkSel);
+    WriteTracksMT(inputFilePrefix, trackOutput.Data(), trackBranch, isSubsetCollection, threadsTracks, evtSel, trkSel);
     printf("\n");
     
     printf("=== Writing Seeds ===\n");
-    WriteSeedsMT(inputFilePrefix, seedOutput.Data(), seedBranch, nThreads, evtSel);
+    WriteSeedsMT(inputFilePrefix, seedOutput.Data(), seedBranch, threadsSeeds, evtSel);
     printf("\n");
     
     printf("=== Writing Hits ===\n");
-    WriteHitsMT(inputFilePrefix, hitOutput.Data(), nThreads, evtSel);
+    WriteHitsMT(inputFilePrefix, hitOutput.Data(), threadsHits, evtSel);
     printf("\n");
     
     printf("============================================\n");

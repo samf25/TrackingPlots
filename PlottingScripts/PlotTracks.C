@@ -91,9 +91,9 @@ void PlotTracks(const char* inputFile, const char* outputFile="tracks_plots.root
     TH1D* h_realTracks_chi2ndof = new TH1D("realTracks_chi2ndof", "", 50, 0, 10);
     
     // Resolution histograms
-    TH1D* h_resolutions_q_over_pt = new TH1D("resolutions_q/pt", "", 100, -0.5, 0.5);
-    TH1D* h_resolutions_d0 = new TH1D("resolutions_d0", "", 100, -1., 1.);
-    TH1D* h_resolutions_z0 = new TH1D("resolutions_z0", "", 100, -1., 1.);
+    TH1D* h_resolutions_q_over_pt = new TH1D("resolutions_q/pt", "", 100, -10, 10);
+    TH1D* h_resolutions_d0 = new TH1D("resolutions_d0", "", 100, -10., 10.);
+    TH1D* h_resolutions_z0 = new TH1D("resolutions_z0", "", 100, -10., 10.);
     
     // Event-level histogram
     std::vector<float> numberOfTracksVec;

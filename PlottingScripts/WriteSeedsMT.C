@@ -11,6 +11,10 @@
 #include <mutex>
 #include <thread>
 #include <atomic>
+#include <condition_variable>
+#include <array>
+#include <algorithm>
+#include <cmath>
 
 // Load EDM4hep
 R__LOAD_LIBRARY(libpodio)
@@ -62,10 +66,23 @@ void ProcessAndWriteSeedFile(const std::string& filename, const char* branchName
     dd4hep::DDSegmentation::BitFieldCoder bitFieldCoder("system:5,side:-2,layer:6,module:11,sensor:8");
     
     TFile* file = TFile::Open(filename.c_str());
-    if (!file || file->IsZombie()) return;
+    if (!file || file->IsZombie()) {
+        if (file) {
+            file->Close();
+            delete file;
+        }
+        return;
+    }
     
     TTree* tree = (TTree*)file->Get("events");
-    if (!tree) { file->Close(); return; }
+    if (!tree) {
+        file->Close();
+        delete file;
+        return;
+    }
+
+    // Lower per-thread memory pressure from ROOT read-ahead cache.
+    tree->SetCacheSize(0);
     
     // Get collection ID mapping
     TTree* meta = static_cast<TTree*>(file->Get("podio_metadata"));
@@ -109,17 +126,40 @@ void ProcessAndWriteSeedFile(const std::string& filename, const char* branchName
     if (endEntry < 0 || endEntry > nEntries) endEntry = nEntries;
     if (startEntry < 0) startEntry = 0;
     if (startEntry > endEntry) startEntry = endEntry;
-    totalEntries += (endEntry - startEntry);
+    const Long64_t localEntries = endEntry - startEntry;
+    totalEntries += localEntries;
     
     // Local buffers for this file
     std::vector<std::array<float, 2>> seed_data;
     std::vector<std::array<float, 10>> matched_data;
     std::vector<std::array<float, 3>> layer_data;
     std::vector<std::array<float, 4>> event_data;
-    seed_data.reserve(nEntries * 5);
-    matched_data.reserve(nEntries * 5);
-    layer_data.reserve(nEntries * 20);
-    event_data.reserve(nEntries);
+    const Long64_t reserveEntryCap = 5000;
+    const size_t reserveEntries = static_cast<size_t>(std::max<Long64_t>(1, std::min<Long64_t>(localEntries, reserveEntryCap)));
+    seed_data.reserve(reserveEntries * 5);
+    matched_data.reserve(reserveEntries * 5);
+    layer_data.reserve(reserveEntries * 20);
+    event_data.reserve(reserveEntries);
+
+    auto flushBuffers = [&]() {
+        if (seed_data.empty() && matched_data.empty() && layer_data.empty() && event_data.empty()) {
+            return;
+        }
+        std::lock_guard<std::mutex> lock(writeMutex);
+        for (const auto& d : seed_data) ntuple_seeds->Fill(d[0], d[1]);
+        for (const auto& d : matched_data) ntuple_matched->Fill(d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9]);
+        for (const auto& d : layer_data) ntuple_layers->Fill(d[0], d[1], d[2]);
+        for (const auto& d : event_data) ntuple_events->Fill(d[0], d[1], d[2], d[3]);
+        seed_data.clear();
+        matched_data.clear();
+        layer_data.clear();
+        event_data.clear();
+    };
+
+    const size_t kMaxSeedRows = 50000;
+    const size_t kMaxMatchedRows = 25000;
+    const size_t kMaxLayerRows = 200000;
+    const size_t kMaxEventRows = 20000;
     
     TBranch* mcBranch = tree->GetBranch("MCParticles");
     const bool doEvtSel = EventSelectionIsActive(evtSel);
@@ -157,9 +197,10 @@ void ProcessAndWriteSeedFile(const std::string& filename, const char* branchName
         
         for (const auto& trk : *tracks) {
             totalSeeds++;
+            if (trk.trackStates_begin < 0 || trk.trackStates_begin >= (int)trackStates->size()) continue;
             const auto& firstTrackState = (*trackStates)[trk.trackStates_begin];
             double tanLambda = firstTrackState.tanLambda;
-            float theta = atan2(1.0, tanLambda);
+            float theta = std::atan2(1.0, tanLambda);
 
             std::vector<int> matchedMCPIndices;
             for (unsigned int hitIdx = trk.trackerHits_begin; hitIdx < trk.trackerHits_end; ++hitIdx) {
@@ -219,6 +260,7 @@ void ProcessAndWriteSeedFile(const std::string& filename, const char* branchName
 
             if (isMatched) {
                 matchedSeeds++;
+                if (!mcParticles || matchedMCPIndex >= mcParticles->size()) continue;
                 const auto& matchedMCP = (*mcParticles)[matchedMCPIndex];
                 const edm4hep::Vector3d& mom = matchedMCP.momentum;
                 float true_pt = std::sqrt(mom.x*mom.x + mom.y*mom.y);
@@ -226,9 +268,10 @@ void ProcessAndWriteSeedFile(const std::string& filename, const char* branchName
                 float true_d0 = std::sqrt(matchedMCP.vertex.x * matchedMCP.vertex.x + matchedMCP.vertex.y * matchedMCP.vertex.y);
                 float true_z0 = matchedMCP.vertex.z;
                 
-                float reco_pt = fabs(0.3 * 5.0 / firstTrackState.omega / 1000);
+                float reco_pt = std::fabs(0.3f * 5.0f / firstTrackState.omega / 1000.0f);
                 float reco_d0 = firstTrackState.D0;
                 float reco_z0 = firstTrackState.Z0;
+                if (!std::isfinite(reco_pt) || reco_pt <= 1e-9f || true_pt <= 1e-9f) continue;
                 
                 float true_q_over_pt = matchedMCP.charge / true_pt;
                 float reco_q_over_pt = matchedMCP.charge / reco_pt;
@@ -251,18 +294,19 @@ void ProcessAndWriteSeedFile(const std::string& filename, const char* branchName
         }
         
         event_data.push_back({(float)totalSeeds, (float)matchedSeeds, (float)unmatchedSeeds, avgSeedsPerMCP});
+
+        if (seed_data.size() >= kMaxSeedRows ||
+            matched_data.size() >= kMaxMatchedRows ||
+            layer_data.size() >= kMaxLayerRows ||
+            event_data.size() >= kMaxEventRows) {
+            flushBuffers();
+        }
     }
     
     file->Close();
-    
-    // Write to TNtuples with mutex protection
-    {
-        std::lock_guard<std::mutex> lock(writeMutex);
-        for (const auto& d : seed_data) ntuple_seeds->Fill(d[0], d[1]);
-        for (const auto& d : matched_data) ntuple_matched->Fill(d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9]);
-        for (const auto& d : layer_data) ntuple_layers->Fill(d[0], d[1], d[2]);
-        for (const auto& d : event_data) ntuple_events->Fill(d[0], d[1], d[2], d[3]);
-    }
+    delete file;
+
+    flushBuffers();
 }
 
 void WriteSeedsMT(const char* inputFilePrefix, const char* outputFile,
@@ -335,10 +379,28 @@ void WriteSeedsMT(const char* inputFilePrefix, const char* outputFile,
 
     std::vector<std::thread> threads;
     int actualThreads = std::min(nThreads, std::max(1, (int)tasks.size()));
+    const int maxConcurrentFileTasks = std::min(actualThreads, std::max(1, (int)files.size()));
+    std::mutex activeFileMutex;
+    std::condition_variable activeFileCv;
+    int activeFileTasks = 0;
+
+    printf("Seed concurrency guard: max %d active file tasks\n", maxConcurrentFileTasks);
+
+    auto releaseActiveFileSlot = [&]() {
+        {
+            std::lock_guard<std::mutex> lock(activeFileMutex);
+            activeFileTasks--;
+        }
+        activeFileCv.notify_one();
+    };
+
     for (int t = 0; t < actualThreads; t++) threads.emplace_back(worker);
     for (auto& t : threads) t.join();
 
     printf("\nTotal events processed: %lld\n", totalEntries.load());
+        printf("Rows to write: seeds=%lld matched=%lld layers=%lld events=%lld\n",
+            ntuple_seeds->GetEntries(), ntuple_matched->GetEntries(),
+            ntuple_layers->GetEntries(), ntuple_events->GetEntries());
     printf("Writing to %s...\n", outputFile);
     
     outFile->Write();

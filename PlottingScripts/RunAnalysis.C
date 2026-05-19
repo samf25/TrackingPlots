@@ -22,6 +22,9 @@ struct AnalysisConfig {
     std::string inputFilePrefix;
     std::string outputDir;
     int nThreads = 4;
+    int nThreadsTracks = -1;
+    int nThreadsSeeds = -1;
+    int nThreadsHits = -1;
     std::string trackBranch;
     bool isSubsetCollection = true;
     std::string seedBranch;
@@ -35,6 +38,9 @@ AnalysisConfig DefaultAnalysisConfig() {
     cfg.inputFilePrefix = "/global/cfs/cdirs/m5197/sferrar2/TrackingPaper/MC/Mu_pgun_MAIA_v0/reco_mu-_p1-5000_theta15-165_";
     cfg.outputDir = "/global/cfs/cdirs/m5197/sferrar2/TrackingPaper/MC/ntuples_Mu_pgun_MAIA_v0_ENDCAP";
     cfg.nThreads = 50;
+    cfg.nThreadsTracks = -1;
+    cfg.nThreadsSeeds = -1;
+    cfg.nThreadsHits = -1;
     cfg.trackBranch = "SiTrack";
     cfg.isSubsetCollection = true;
     cfg.seedBranch = "SeedTracks";
@@ -81,6 +87,9 @@ bool LoadAnalysisConfig(const char* configPath, AnalysisConfig& cfg) {
     cfg.inputFilePrefix = env.GetValue("io.inputFilePrefix", cfg.inputFilePrefix.c_str());
     cfg.outputDir = env.GetValue("io.outputDir", cfg.outputDir.c_str());
     cfg.nThreads = env.GetValue("io.nThreads", cfg.nThreads);
+    cfg.nThreadsTracks = env.GetValue("io.nThreadsTracks", cfg.nThreadsTracks);
+    cfg.nThreadsSeeds = env.GetValue("io.nThreadsSeeds", cfg.nThreadsSeeds);
+    cfg.nThreadsHits = env.GetValue("io.nThreadsHits", cfg.nThreadsHits);
     cfg.trackBranch = env.GetValue("io.trackBranch", cfg.trackBranch.c_str());
     cfg.isSubsetCollection = env.GetValue("io.isSubsetCollection", cfg.isSubsetCollection ? 1 : 0) != 0;
     cfg.seedBranch = env.GetValue("io.seedBranch", cfg.seedBranch.c_str());
@@ -124,6 +133,9 @@ void PrintLoadedConfig(const AnalysisConfig& cfg, const char* configPath) {
     printf("io.inputFilePrefix     = %s\n", cfg.inputFilePrefix.c_str());
     printf("io.outputDir           = %s\n", cfg.outputDir.c_str());
     printf("io.nThreads            = %d\n", cfg.nThreads);
+    printf("io.nThreadsTracks      = %d\n", cfg.nThreadsTracks);
+    printf("io.nThreadsSeeds       = %d\n", cfg.nThreadsSeeds);
+    printf("io.nThreadsHits        = %d\n", cfg.nThreadsHits);
     printf("io.trackBranch         = %s\n", cfg.trackBranch.c_str());
     printf("io.isSubsetCollection  = %d\n", cfg.isSubsetCollection ? 1 : 0);
     printf("io.seedBranch          = %s\n", cfg.seedBranch.c_str());
@@ -164,5 +176,6 @@ void RunAnalysis(const char* configPath = "RunAnalysis.conf") {
 
     WriteAllMT(cfg.inputFilePrefix.c_str(), cfg.outputDir.c_str(), cfg.nThreads,
                cfg.trackBranch.c_str(), cfg.isSubsetCollection, cfg.seedBranch.c_str(),
-               cfg.evtSel, cfg.trkSel);
+               cfg.evtSel, cfg.trkSel,
+               cfg.nThreadsTracks, cfg.nThreadsSeeds, cfg.nThreadsHits);
 }

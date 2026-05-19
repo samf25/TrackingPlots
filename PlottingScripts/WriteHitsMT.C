@@ -45,10 +45,20 @@ void ProcessAndWriteHitFile(const std::string& filename, TNtuple* ntuple_hits, T
                             std::mutex& writeMutex, std::atomic<Long64_t>& totalEntries,
                             const EventSelectionConfig& evtSel) {
     TFile* file = TFile::Open(filename.c_str());
-    if (!file || file->IsZombie()) return;
+    if (!file || file->IsZombie()) {
+        if (file) {
+            file->Close();
+            delete file;
+        }
+        return;
+    }
     
     TTree* tree = (TTree*)file->Get("events");
-    if (!tree) { file->Close(); return; }
+    if (!tree) {
+        file->Close();
+        delete file;
+        return;
+    }
 
     std::vector<std::vector<edm4hep::TrackerHitPlaneData>*> hitCollections(6, nullptr);
     std::vector<edm4hep::MCParticleData>* mcParticles = nullptr;
@@ -117,6 +127,7 @@ void ProcessAndWriteHitFile(const std::string& filename, TNtuple* ntuple_hits, T
     }
     
     file->Close();
+    delete file;
     
     // Write to TNtuples with mutex protection
     {

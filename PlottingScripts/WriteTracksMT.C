@@ -47,11 +47,18 @@ void ProcessAndWriteTrackFile(const std::string& filename, const char* branchNam
                               const EventSelectionConfig& evtSel, const TrackSelectionConfig& trkSel) {
     
     TFile* file = TFile::Open(filename.c_str());
-    if (!file || file->IsZombie()) return;
+    if (!file || file->IsZombie()) {
+        if (file) {
+            file->Close();
+            delete file;
+        }
+        return;
+    }
     
     TTree* tree = (TTree*)file->Get("events");
     if (!tree) {
         file->Close();
+        delete file;
         return;
     }
     
@@ -257,6 +264,7 @@ void ProcessAndWriteTrackFile(const std::string& filename, const char* branchNam
     }
     
     file->Close();
+    delete file;
     
     // Write to TNtuples with mutex protection
     {
