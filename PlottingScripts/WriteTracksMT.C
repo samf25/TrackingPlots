@@ -163,17 +163,24 @@ void ProcessAndWriteTrackFile(const std::string& filename, const char* branchNam
         
         std::vector<bool> trackMatched(trkSet.size(), false);
         auto chooseTrackStateIndex = [&](const edm4hep::TrackData& trk) -> int {
-            // Prefer the first (begin) state; if its omega is bad, try the last.
             if (!trackStates) return -1;
-            int begin = trk.trackStates_begin;
-            int end = trk.trackStates_end;
-            if (begin >= 0 && begin < (int)trackStates->size() && std::abs((*trackStates)[begin].omega) > 1e-9) {
-                return begin;
+
+            const int begin = trk.trackStates_begin;
+            const int end   = trk.trackStates_end;
+            const int n     = static_cast<int>(trackStates->size());
+
+            if (begin < 0 || end < begin || end > n) return -1;
+
+            for (int i = begin; i < end; ++i) {
+                const auto& ts = (*trackStates)[i];
+                if (ts.location == edm4hep::TrackState::AtIP &&
+                    std::isfinite(ts.omega) &&
+                    std::abs(ts.omega) > 1e-9) {
+                    return i;
+                }
             }
-            if (end > begin && end - 1 < (int)trackStates->size() && std::abs((*trackStates)[end - 1].omega) > 1e-9) {
-                return end - 1;
-            }
-            return begin; // will be filtered by validity check
+
+            return -1;
         };
         auto stateIsValid = [&](int idx) {
             return idx >= 0 && trackStates && idx < (int)trackStates->size() && std::abs((*trackStates)[idx].omega) > 1e-9;
@@ -253,7 +260,9 @@ void ProcessAndWriteTrackFile(const std::string& filename, const char* branchNam
             // ── Track selection ──────────────────────────────────
             if (!TrackPassesSelection(trackPt, trackTheta, trackPhi,
                                      trackD0, trackZ0, chi2ndof,
-                                     iNHits, iNHoles, trkSel)) continue;
+                                     iNHits, iNHoles, trkSel)) {
+                continue;
+            }
 
             float isReal = trackMatched[t] ? 1.0f : 0.0f;
             track_data.push_back({trackPt, (float)iNHits, (float)iNHoles, chi2ndof, isReal});
