@@ -67,7 +67,7 @@ void PlotTracks(const char* inputFile, const char* outputFile="tracks_plots.root
     
     const int nThetaBins = 12;
     const double thetaMin = 0.0;
-    const double thetaMax = 3.14159;
+    const double thetaMax = 3.15;
     
     // === Create histograms from ntuples ===
     
@@ -192,30 +192,18 @@ void PlotTracks(const char* inputFile, const char* outputFile="tracks_plots.root
     
     // === Efficiency vs pT ===
     TCanvas* c_eff_pt = MuCollStyle::CreateCanvas("c_eff_pt", "Tracking Efficiency vs p_{T}");
-    // Draw a dummy histogram for axes
-    TH1D* h_dummy_pt = new TH1D("h_dummy_pt", "", nPtBins, ptEdges.data());
-    h_dummy_pt->SetMinimum(0.0);
-    h_dummy_pt->SetMaximum(1.1);
-    h_dummy_pt->GetXaxis()->SetTitle("p_{T} [GeV]");
-    h_dummy_pt->GetYaxis()->SetTitle("Efficiency");
+    eff_pt->SetTitle(";p_{T} [GeV];Efficiency");
     c_eff_pt->SetLogx();
-    h_dummy_pt->GetXaxis()->SetMoreLogLabels(kFALSE); // only decades
-    h_dummy_pt->GetXaxis()->SetNdivisions(510, kFALSE);
-    h_dummy_pt->Draw("AXIS");
-    eff_pt->Draw("SAME APE");
+    eff_pt->Draw("APE");
     MuCollStyle::AddStandardLabels(c_eff_pt, "10 TeV");
     c_eff_pt->Write();
     c_eff_pt->SaveAs(outDir+"tracks_eff_pt."+suffix);
 
     // === Efficiency vs theta ===
     TCanvas* c_eff_theta = MuCollStyle::CreateCanvas("c_eff_theta", "Tracking Efficiency vs #theta");
-    TH1D* h_dummy_theta = new TH1D("h_dummy_theta", "", nThetaBins, thetaMin, thetaMax);
-    h_dummy_theta->SetMinimum(0.0);
-    h_dummy_theta->SetMaximum(1.1);
-    h_dummy_theta->GetXaxis()->SetTitle("#theta [rad]");
-    h_dummy_theta->GetYaxis()->SetTitle("Efficiency");
-    h_dummy_theta->Draw("AXIS");
-    eff_theta->Draw("SAME APE");
+    TH1F* frame = c_eff_theta->DrawFrame(thetaMin, 0.0, thetaMax, 1.1);
+    frame->SetTitle(";#theta [rad];Efficiency");
+    eff_theta->Draw("PE SAME");
     MuCollStyle::AddStandardLabels(c_eff_theta, "10 TeV");
     c_eff_theta->Write();
     c_eff_theta->SaveAs(outDir+"tracks_eff_theta."+suffix);
@@ -225,16 +213,9 @@ void PlotTracks(const char* inputFile, const char* outputFile="tracks_plots.root
     fakeDir->cd();
 
     TCanvas* c_fake = MuCollStyle::CreateCanvas("c_fake_rate", "Fake Rate vs p_{T}");
-    TH1D* h_dummy_fake = new TH1D("h_dummy_fake", "", nPtBins, ptEdges.data());
-    h_dummy_fake->SetMinimum(0.0);
-    h_dummy_fake->SetMaximum(1.1);
-    h_dummy_fake->GetXaxis()->SetTitle("p_{T} [GeV]");
-    h_dummy_fake->GetYaxis()->SetTitle("Fake Rate");
+    fake_rate->SetTitle(";p_{T} [GeV];Fake Rate");
     c_fake->SetLogx();
-    h_dummy_fake->GetXaxis()->SetMoreLogLabels(kFALSE); // only decades
-    h_dummy_fake->GetXaxis()->SetNdivisions(510, kFALSE);
-    h_dummy_fake->Draw("AXIS");
-    fake_rate->Draw("SAME APE");
+    fake_rate->Draw("APE");
     MuCollStyle::AddStandardLabels(c_fake, "10 TeV");
     c_fake->Write();
     c_fake->SaveAs(outDir+"tracks_fake."+suffix);
