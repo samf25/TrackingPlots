@@ -208,6 +208,7 @@ void PlotHits(const char* inputFile, const char* outputFile="hits_plots.root", c
     h_nHits_total->GetYaxis()->SetTitle("Events");
     h_nHits_total->Draw("HIST");
     MuCollStyle::AddStandardLabels(c_total, "10 TeV");
+    c_total->SetRightMargin(0.06);
     c_total->Write();
     c_total->SaveAs(outDir+"hits_total_hits."+suffix);
     
@@ -234,6 +235,7 @@ void PlotHits(const char* inputFile, const char* outputFile="hits_plots.root", c
     leg_layers->AddEntry(h_nHits_OT, "Outer Tracker", "l");
     leg_layers->Draw();
     MuCollStyle::AddStandardLabels(c_layers, "10 TeV");
+    c_layers->SetRightMargin(0.06);
     c_layers->Write();
     c_layers->SaveAs(outDir+"hits_layer_hits."+suffix);
     
